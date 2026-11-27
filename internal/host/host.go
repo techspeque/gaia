@@ -1,7 +1,9 @@
 // Package host runs the host role: the machine registry and the API.
 //
-// The API is served on whatever listener the caller passes to Serve; in
-// this phase that is the user-only local socket (ADR-0004). Nodes reach the
+// The API is served on the user-only local socket (Serve) and, with
+// `gaia host --tailnet`, on the tailnet (ServeTailnet), where every request
+// is authorised by the peer's tailnet identity against an Allowlist
+// (ADR-0004 rules 4, 5). /healthz is served on the socket only. Nodes reach the
 // registry through Register and Heartbeat, in-process for the host's own
 // machine (`gaia host --node`).
 package host
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"github.com/techspeque/gaia/internal/core"
+	gnet "github.com/techspeque/gaia/internal/net"
 	"github.com/techspeque/gaia/internal/store"
 )
 
@@ -42,6 +45,9 @@ type Options struct {
 	Logger *slog.Logger
 	// Now is the clock. Default: time.Now.
 	Now func() time.Time
+	// Allowlist names the tailnet peers TailnetHandler admits. Default:
+	// no one.
+	Allowlist Allowlist
 }
 
 // Server is the host's registry and API.
@@ -74,8 +80,18 @@ func (s *Server) HeartbeatInterval() time.Duration { return s.opts.HeartbeatInte
 // Serve serves the API on l until ctx is done, then shuts down, waiting up
 // to five seconds for requests in flight. It closes l.
 func (s *Server) Serve(ctx context.Context, l net.Listener) error {
+	return s.serve(ctx, l, s.Handler())
+}
+
+// ServeTailnet serves TailnetHandler(w) on l, a TLS listener on the
+// tailnet, as Serve does.
+func (s *Server) ServeTailnet(ctx context.Context, l net.Listener, w WhoIser) error {
+	return s.serve(ctx, l, s.TailnetHandler(w))
+}
+
+func (s *Server) serve(ctx context.Context, l net.Listener, h http.Handler) error {
 	srv := &http.Server{
-		Handler:           s.Handler(),
+		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
 		ErrorLog:          slog.NewLogLogger(s.log.Handler(), slog.LevelWarn),
 	}
@@ -95,16 +111,51 @@ func (s *Server) Serve(ctx context.Context, l net.Listener) error {
 	return err
 }
 
-// Handler returns the API handler.
+// Handler returns the API handler for the local socket.
 func (s *Server) Handler() http.Handler {
+	return s.logRequests(s.routes(true))
+}
+
+// WhoIser names the tailnet peer behind a connection's remote address.
+// *net.Tailnet is one.
+type WhoIser interface {
+	WhoIs(ctx context.Context, remoteAddr string) (gnet.Peer, error)
+}
+
+// TailnetHandler returns the API handler for the tailnet: the /api/v1
+// routes, without /healthz, behind a WhoIs check. A peer that WhoIs cannot
+// name or that Options.Allowlist does not admit gets 403 with code
+// forbidden and a generic message, before any routing, and a warn log line.
+func (s *Server) TailnetHandler(w WhoIser) http.Handler {
+	api := s.routes(false)
+	return s.logRequests(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		peer, err := w.WhoIs(r.Context(), r.RemoteAddr)
+		switch {
+		case err != nil:
+			s.log.Warn("tailnet request refused: peer unknown", "remote_addr", r.RemoteAddr, "err", err)
+		case !s.opts.Allowlist.Allows(peer):
+			s.log.Warn("tailnet request refused: peer not allowlisted", "remote_addr", r.RemoteAddr,
+				"login", peer.LoginName, "node", peer.NodeName, "tags", peer.Tags)
+		default:
+			api.ServeHTTP(rw, r)
+			return
+		}
+		writeError(rw, http.StatusForbidden, core.NewError(core.CodeForbidden, "permission denied"))
+	}))
+}
+
+// routes returns the API routes, with /healthz when healthz is set.
+func (s *Server) routes(healthz bool) *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc(core.HealthzPath, s.get(s.healthz))
+	if healthz {
+		mux.HandleFunc(core.HealthzPath, s.get(s.healthz))
+	}
 	mux.HandleFunc(core.VersionPath, s.get(s.version))
 	mux.HandleFunc(core.NodesPath, s.get(s.listNodes))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, core.NewError(core.CodeNotFound, "no such endpoint"))
 	})
-	return s.logRequests(mux)
+	return mux
 }
 
 func (s *Server) get(h func(*http.Request) (any, error)) http.HandlerFunc {

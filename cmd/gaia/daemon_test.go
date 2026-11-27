@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"net"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/techspeque/gaia/internal/core"
 	"github.com/techspeque/gaia/internal/logging"
+	gnet "github.com/techspeque/gaia/internal/net"
 	"github.com/techspeque/gaia/internal/sock"
 )
 
@@ -30,8 +32,25 @@ import (
 // run the real main in a child process.
 const runMainEnv = "GAIA_TEST_RUN_MAIN"
 
+// allowTailnetEnv lets a child daemon enter internal/net. Without it the
+// child's tailnetJoin is a trap that prints tailnetTrapMsg and exits
+// tailnetTrapCode, so every daemon test without --tailnet proves the start
+// path never enters internal/net.
+const (
+	allowTailnetEnv = "GAIA_TEST_ALLOW_TAILNET"
+	tailnetTrapMsg  = "TEST TRAP: internal/net entered"
+	tailnetTrapCode = 97
+)
+
 func TestMain(m *testing.M) {
 	if os.Getenv(runMainEnv) == "1" {
+		if os.Getenv(allowTailnetEnv) != "1" {
+			tailnetJoin = func(context.Context, gnet.Config) (*gnet.Tailnet, error) {
+				fmt.Fprintln(os.Stderr, tailnetTrapMsg)
+				os.Exit(tailnetTrapCode)
+				return nil, nil
+			}
+		}
 		os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 	}
 	os.Exit(m.Run())
@@ -85,6 +104,12 @@ func shortTempDir(t *testing.T) string {
 // set one, and XDG_RUNTIME_DIR set to xdg.
 func startDaemon(t *testing.T, xdg string, args ...string) *daemon {
 	t.Helper()
+	return startDaemonEnv(t, xdg, nil, args...)
+}
+
+// startDaemonEnv is startDaemon with env added to the child's environment.
+func startDaemonEnv(t *testing.T, xdg string, env []string, args ...string) *daemon {
+	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +119,7 @@ func startDaemon(t *testing.T, xdg string, args ...string) *daemon {
 	}
 	d := &daemon{rtDir: filepath.Join(xdg, "gaia"), stderr: &lockedBuffer{}, exited: make(chan struct{})}
 	d.cmd = exec.Command(exe, append([]string{"host"}, args...)...)
-	d.cmd.Env = append(os.Environ(), runMainEnv+"=1", "XDG_RUNTIME_DIR="+xdg)
+	d.cmd.Env = append(append(os.Environ(), runMainEnv+"=1", "XDG_RUNTIME_DIR="+xdg), env...)
 	d.cmd.Stderr = d.stderr
 	if err := d.cmd.Start(); err != nil {
 		t.Fatal(err)

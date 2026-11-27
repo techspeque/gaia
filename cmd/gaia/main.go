@@ -23,6 +23,11 @@ const usage = `usage: gaia <command> [flags]
 
   host [--state DIR] [--node]   run the host daemon; --node also runs this
                                 machine as a node (local-only mode)
+       [--tailnet [--control-url URL] --allow ENTRY... | --allow-file PATH
+        [--auth-key-file PATH]]
+                                also join a tailnet and serve the API on it;
+                                the auth key comes from $GAIA_AUTHKEY,
+                                $TS_AUTHKEY or --auth-key-file, never a flag
   nodes [-o text|json]          list the machines registered with the host
   --version                    print version, commit and platform
 `
