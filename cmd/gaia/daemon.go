@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -104,29 +105,51 @@ func runHost(args []string, stderr io.Writer, goos string) int {
 		}()
 	}
 
+	code := awaitShutdown(sigCtx.Done(), served, nodeDone, func() {
+		stopSignals() // a second signal now terminates at once
+		cancel()
+	}, log)
+	if err := l.Close(); err != nil {
+		log.Error("closing the local socket", "err", err)
+	}
+	log.Info("host stopped", "exit_code", code)
+	return code
+}
+
+// awaitShutdown waits for a signal, the API server or the local node to
+// end, calls stop, then waits for the API server. The server's single result
+// is received exactly once: a signal also cancels Serve's context, so Serve
+// may return before the signal is seen, and that is a normal shutdown.
+func awaitShutdown(sigDone <-chan struct{}, served, nodeDone <-chan error, stop func(), log *slog.Logger) int {
 	code := 0
+	var serveErr error
+	serverDone := false
 	select {
-	case <-sigCtx.Done():
+	case <-sigDone:
 		log.Info("shutting down")
-	case err := <-served:
-		log.Error("API server stopped", "err", err)
-		code = 1
+	case serveErr = <-served:
+		serverDone = true
+		select {
+		case <-sigDone:
+			log.Info("shutting down")
+		default:
+			log.Error("API server stopped", "err", serveErr)
+			code = 1
+		}
 	case err := <-nodeDone:
 		if err != nil {
 			log.Error("local node stopped", "err", err)
 			code = 1
 		}
 	}
-	stopSignals() // a second signal now terminates at once
-	cancel()
-	if err := <-served; err != nil && code == 0 {
-		log.Error("API server shutdown", "err", err)
+	stop()
+	if !serverDone {
+		serveErr = <-served
+	}
+	if serveErr != nil && code == 0 {
+		log.Error("API server shutdown", "err", serveErr)
 		code = 1
 	}
-	if err := l.Close(); err != nil {
-		log.Error("closing the local socket", "err", err)
-	}
-	log.Info("host stopped", "exit_code", code)
 	return code
 }
 

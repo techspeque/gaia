@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/techspeque/gaia/internal/core"
+	"github.com/techspeque/gaia/internal/logging"
 	"github.com/techspeque/gaia/internal/sock"
 )
 
@@ -494,4 +495,46 @@ func procInetSockets(pid int) ([]string, error) {
 		}
 	}
 	return socks, nil
+}
+
+// TestShutdownServerResultConsumedOnce covers Serve returning before the
+// shutdown select runs: its one result must not be awaited a second time.
+func TestShutdownServerResultConsumedOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		signaled bool
+		serveErr error
+		want     int
+	}{
+		{"signal, Serve already returned nil", true, nil, 0},
+		{"signal, Serve already returned an error", true, errors.New("boom"), 1},
+		{"no signal, Serve stopped on its own", false, nil, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sigDone := make(chan struct{})
+			if tc.signaled {
+				close(sigDone)
+			}
+			served := make(chan error, 1)
+			served <- tc.serveErr
+			var out bytes.Buffer
+			stopped := make(chan struct{}, 1)
+			got := make(chan int, 1)
+			go func() {
+				stop := func() { stopped <- struct{}{} }
+				got <- awaitShutdown(sigDone, served, make(chan error), stop, logging.New(&out, nil))
+			}()
+			select {
+			case code := <-got:
+				if code != tc.want {
+					t.Fatalf("exit code %d, want %d; log:\n%s", code, tc.want, out.String())
+				}
+				if len(stopped) != 1 {
+					t.Fatal("stop was not called")
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("awaitShutdown hung waiting for a second server result")
+			}
+		})
+	}
 }
