@@ -2,3 +2,4 @@
 .metis/runs/
 .metis/.lock
 .local/
+/dist/

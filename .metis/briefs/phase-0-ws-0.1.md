@@ -78,4 +78,11 @@ None.
 
 ## Report
 
-Filled at implementation.
+- Added: `go.mod` (go 1.26.3, tool `honnef.co/go/tools/cmd/staticcheck` v0.8.2), `go.sum`, `Makefile`, `deps_test.go`, `cmd/gaia/{main,main_test}.go`, `internal/*/doc.go` (11 placeholders), `.github/workflows/ci.yml`, `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`. Changed: `README.md`, `.gitignore` (`/dist/`).
+- `make verify`: pass (gofmt, vet, staticcheck, tests).
+- `make build-all`: six binaries in `dist/`, each checked `CGO_ENABLED=0` via `go version -m`.
+- `CGO_ENABLED=1 make build-all` and `make build-all CGO_ENABLED=1`: both exit non-zero at `cgo-guard`.
+- `go run -ldflags "-X main.version=v0.0.0-test -X main.commit=abc123" ./cmd/gaia --version` → `gaia v0.0.0-test (commit abc123) darwin/arm64`.
+- A temporary `internal/store` → `internal/creds` import made `TestDependencyRule` fail with the leaf-rule message; removed.
+- Not verified here: CI green on the integration branch (needs a push).
+- Grep for personal names and email in added files: no hits. The module path `github.com/techspeque/gaia` is the one the plan names.
