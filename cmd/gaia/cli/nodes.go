@@ -41,18 +41,24 @@ func usageError(stderr io.Writer, fs *flag.FlagSet, msg string) int {
 // Nodes runs `gaia nodes [-o text|json]` and returns the exit code.
 func Nodes(args []string, env Env) int {
 	fs := flag.NewFlagSet("gaia nodes", flag.ContinueOnError)
-	fs.SetOutput(env.Stderr)
+	// The parser's own diagnostic lacks the "gaia: " prefix; discard it and
+	// report the returned error instead.
+	fs.SetOutput(io.Discard)
 	var output string
 	fs.StringVar(&output, "o", "text", "output format: text or json")
 	fs.StringVar(&output, "output", "text", "output format: text or json")
-	fs.Usage = func() {
+	usage := func() {
 		fmt.Fprintln(env.Stderr, "usage: gaia nodes [-o text|json]")
 	}
-	if err := fs.Parse(args); err != nil {
+	fs.Usage = func() {}
+	err := fs.Parse(args)
+	fs.Usage = usage
+	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
+			usage()
 			return 0
 		}
-		return int(core.ExitUsage)
+		return usageError(env.Stderr, fs, "gaia nodes: "+err.Error())
 	}
 	if fs.NArg() > 0 {
 		return usageError(env.Stderr, fs, fmt.Sprintf("gaia nodes: unexpected argument %q", fs.Arg(0)))

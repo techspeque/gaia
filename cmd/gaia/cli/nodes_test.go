@@ -185,6 +185,12 @@ func TestNodesUsage(t *testing.T) {
 		if !strings.Contains(errOut.String(), "usage: gaia nodes") {
 			t.Errorf("%q: stderr %q lacks the usage", args, errOut.String())
 		}
+		if !strings.HasPrefix(errOut.String(), "gaia: ") {
+			t.Errorf("%q: stderr %q does not start with %q", args, errOut.String(), "gaia: ")
+		}
+		if n := strings.Count(errOut.String(), "usage: gaia nodes"); n != 1 {
+			t.Errorf("%q: stderr %q has the usage %d times, want 1", args, errOut.String(), n)
+		}
 		if out.Len() != 0 {
 			t.Errorf("%q: stdout %q", args, out.String())
 		}
