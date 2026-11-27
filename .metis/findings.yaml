@@ -131,3 +131,11 @@ findings:
       category: ""
       finding: 'Gate run 1 (v0.0.1): after the node service had been stopped about 40 s and started again, the node registered at once but the next forwarded request (gaia nodes on the node, 5 s later) and the next heartbeat both timed out (''context deadline exceeded''); it re-registered and recovered within about 16 s of start. Not reproduced on an immediate restart (25 samples, 14-15 ms each). Likely the host''s stale path to the node''s new WireGuard endpoint; worth a look before Phase 1 sessions depend on the forwarder.'
       status: advisory
+    - id: f-013
+      date: "2026-11-27"
+      slice: phase-0-gate
+      severity: P3
+      category: ""
+      finding: 'Gate run 1 (v0.0.1): the tailnet client creates an empty ~/.local/share/tailscale (tsnet logpolicy ''using system state directory'') outside Gaia''s state directory on the first join, although logtail is disabled (internal/net/tailnet.go:81). Harmless, but OVERVIEW 8 says the state directory is the one thing to back up and README says the node''s state is only <state>/tsnet.'
+      status: advisory
+      file: internal/net/tailnet.go
