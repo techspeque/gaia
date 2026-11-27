@@ -89,9 +89,12 @@ findings:
       severity: P2
       category: behavior
       finding: 'internal/service/service.go:132 — Install writes the desired unit before applying it, then treats byte equality as proof it was applied. Reproduced on Linux by failing daemon-reload during an update and on macOS by failing bootout: retry returns Changed=false with no mutating commands while the old configuration remains loaded. Preserve/recover pending application or restore the prior file on failure so retry actually applies the desired configuration; add failed-update/retry regression tests for both platforms.'
-      status: open
+      status: resolved
+      resolved_by: commit 9a04f6d7be6d; test TestInstallFailedUpdateRetried
       cycle: 1
       file: internal/service/service.go
+      commit: 9a04f6d7be6d666b20a5dbdfad90bb207fce2181
+      evidence: test TestInstallFailedUpdateRetried
     - id: f-009
       date: "2026-11-27"
       slice: phase-0-ws-0.9
