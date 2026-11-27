@@ -27,7 +27,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - uses: sigstore/cosign-installer@v4
+      - uses: sigstore/cosign-installer@v4.1.4
       - uses: anchore/sbom-action/download-syft@v0
       - name: release (draft)
         if: github.event_name == 'push'
