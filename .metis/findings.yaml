@@ -83,3 +83,12 @@ findings:
       file: cmd/gaia/node.go
       commit: e0d4d303b18cb871860c96d29cb956d0097dcca7
       evidence: test TestNodeStartErrors
+    - id: f-008
+      date: "2026-11-27"
+      slice: phase-0-ws-0.9
+      severity: P2
+      category: behavior
+      finding: 'internal/service/service.go:132 — Install writes the desired unit before applying it, then treats byte equality as proof it was applied. Reproduced on Linux by failing daemon-reload during an update and on macOS by failing bootout: retry returns Changed=false with no mutating commands while the old configuration remains loaded. Preserve/recover pending application or restore the prior file on failure so retry actually applies the desired configuration; add failed-update/retry regression tests for both platforms.'
+      status: open
+      cycle: 1
+      file: internal/service/service.go
