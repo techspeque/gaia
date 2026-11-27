@@ -51,7 +51,7 @@ Design decisions:
 - API: `APIVersion = 1`, `APIPrefix = "/api/v1"`. Types: `Node`,
   `ListNodesResponse{nodes}`, `RegisterNodeRequest`, `RegisterNodeResponse`,
   `HeartbeatRequest`, all with snake_case JSON tags.
-- Redaction: `core.Secret` wraps a string; `String`, `GoString`, `Format`
+- Redaction: `core.Secret` wraps a string value; `String`, `GoString`, `Format`
   (every verb and flag), `MarshalJSON`, `MarshalText` all yield `[REDACTED]`;
   the value is reachable only through an explicit `Reveal()` method.
   No unmarshal methods: decoding into a Secret is out of scope for Phase 0.
@@ -98,5 +98,15 @@ None.
 
 ## Report
 
-Filled at implementation. Facts and evidence only: what changed, commands run and their results,
-decisions taken with the reason, findings resolved. No narrative; short.
+- Files: `internal/core/{doc,id,state,exitcode,error,api,secret}.go` and
+  `{id,state,exitcode,error,secret,noio}_test.go`.
+- `CGO_ENABLED=0 go test ./internal/core/` ok; `metis verify --post` result
+  recorded by the flip.
+- Decision: `Secret` holds its value in a closure, not a string or pointer.
+  `secret_test.go` showed that a Secret in an unexported struct field,
+  printed with a bad verb (`%s`, `%q`, `%e` …), was dereferenced by fmt and
+  leaked with a pointer field. A func prints only as an address. Side
+  effect: `Secret` is not comparable (no `==`, no map key).
+- Additions beyond the brief's type list, same package: `ErrorResponse`
+  (`{"error": {…}}` body), `HeartbeatResponse`, `NodesPath`,
+  `ExitCode.Retryable` (the contract's retry rule).
