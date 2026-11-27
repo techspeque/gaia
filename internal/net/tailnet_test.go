@@ -135,6 +135,9 @@ func TestJoinDialTLSWhoIs(t *testing.T) {
 	if s.peer.LoginName == "" {
 		t.Errorf("whois login name empty for an untagged node: %+v", s.peer)
 	}
+	if s.peer.StableID == "" {
+		t.Errorf("whois stable id empty: %+v", s.peer)
+	}
 
 	for _, fi := range []string{"", certFile, keyFile} {
 		st, err := os.Stat(filepath.Join(a.dir, fi))
@@ -244,6 +247,56 @@ func TestSelfSignedKeptAndReused(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(dir, certFile)); string(b) != "junk" {
 		t.Error("a corrupt certificate was overwritten")
+	}
+}
+
+func TestLookupPeerAndHasState(t *testing.T) {
+	if testing.Short() {
+		t.Skip("joins a local test tailnet")
+	}
+	control := nettest.StartControl(t, testAuthKey)
+	url := control.HTTPTestServer.URL
+	a := join(t, url, "gaia-host", testAuthKey, &captureLog{})
+	b := join(t, url, "gaia-node", testAuthKey, &captureLog{})
+
+	lookup := func(name string) (PeerAddr, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return b.LookupPeer(ctx, name)
+	}
+	// The netmap naming a may reach b a moment after b is Running.
+	var got PeerAddr
+	var err error
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if got, err = lookup("gaia-host"); err == nil {
+			break
+		}
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Addr.String() != a.Addr() {
+		t.Errorf("lookup by name: %v, want %s", got.Addr, a.Addr())
+	}
+	if got.DNSName != "gaia-host."+nettest.MagicDNSDomain {
+		t.Errorf("dns name %q", got.DNSName)
+	}
+	for _, name := range []string{"GAIA-HOST", "gaia-host." + nettest.MagicDNSDomain + ".", a.Addr()} {
+		if p, err := lookup(name); err != nil || p.Addr != got.Addr {
+			t.Errorf("lookup %q: %v, %v", name, p, err)
+		}
+	}
+	for _, name := range []string{"gaia", "nobody", "gaia-node", "100.64.255.254"} {
+		if p, err := lookup(name); err == nil {
+			t.Errorf("lookup %q found %v", name, p)
+		}
+	}
+
+	if !HasState(filepath.Dir(a.dir)) {
+		t.Error("HasState is false after a join")
+	}
+	if HasState(t.TempDir()) {
+		t.Error("HasState is true for an empty directory")
 	}
 }
 

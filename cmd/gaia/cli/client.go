@@ -76,7 +76,7 @@ func (c *Client) httpClient() *http.Client {
 // Every command calls it before its own request.
 func (c *Client) Connect(ctx context.Context) (core.VersionResponse, error) {
 	var v core.VersionResponse
-	status, err := c.do(ctx, core.VersionPath, &v)
+	status, err := c.do(ctx, http.MethodGet, core.VersionPath, &v)
 	if status == http.StatusNotFound {
 		// A daemon that no longer serves this API at all.
 		return v, c.mismatch(core.VersionResponse{})
@@ -96,7 +96,7 @@ func (c *Client) ListNodes(ctx context.Context) (core.ListNodesResponse, error) 
 	if _, err := c.Connect(ctx); err != nil {
 		return l, err
 	}
-	if _, err := c.do(ctx, core.NodesPath, &l); err != nil {
+	if _, err := c.do(ctx, http.MethodGet, core.NodesPath, &l); err != nil {
 		return l, err
 	}
 	if l.Nodes == nil {
@@ -105,10 +105,26 @@ func (c *Client) ListNodes(ctx context.Context) (core.ListNodesResponse, error) 
 	return l, nil
 }
 
-// do GETs path and decodes a 2xx body into out. A non-2xx answer is
-// returned as the daemon's *core.Error with the HTTP status.
-func (c *Client) do(ctx context.Context, path string, out any) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://gaia"+path, nil)
+// RemoveNode connects, then removes the node called name from the host's
+// registry and returns it as it was. On a node, the request goes to the
+// host through the node.
+func (c *Client) RemoveNode(ctx context.Context, name string) (core.Node, error) {
+	var r core.RemoveNodeResponse
+	if err := core.ValidNodeName(name); err != nil {
+		return r.Node, err
+	}
+	if _, err := c.Connect(ctx); err != nil {
+		return r.Node, err
+	}
+	_, err := c.do(ctx, http.MethodDelete, core.NodePath(name), &r)
+	return r.Node, err
+}
+
+// do sends a body-less request for path and decodes a 2xx body into out.
+// A non-2xx answer is returned as the daemon's *core.Error with the HTTP
+// status.
+func (c *Client) do(ctx context.Context, method, path string, out any) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, method, "http://gaia"+path, nil)
 	if err != nil {
 		return 0, err
 	}

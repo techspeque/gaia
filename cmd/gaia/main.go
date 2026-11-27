@@ -28,7 +28,16 @@ const usage = `usage: gaia <command> [flags]
                                 also join a tailnet and serve the API on it;
                                 the auth key comes from $GAIA_AUTHKEY,
                                 $TS_AUTHKEY or --auth-key-file, never a flag
+       [--heartbeat-interval D] [--missed-heartbeats N]
+                                how often nodes heartbeat, and how many they
+                                may miss before they are offline
+  node --host NAME [--join [--auth-key-file PATH]] [--state DIR]
+       [--name NAME] [--control-url URL]
+                                run this machine as a node of the host NAME
+                                over the tailnet; --join (once) joins the
+                                tailnet with the auth key, as for the host
   nodes [-o text|json]          list the machines registered with the host
+  nodes remove NAME             remove a retired machine from the registry
   --version                    print version, commit and platform
 `
 

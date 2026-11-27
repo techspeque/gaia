@@ -70,6 +70,41 @@ gaia host --tailnet --control-url https://headscale.example.com \
   it serves a self-signed certificate made on first start and kept in
   `<state>/tsnet/gaia-tls.{crt,key}`.
 
+## Adding a machine
+
+Run `gaia node` on each other machine. It joins the same tailnet, registers
+with the host and heartbeats, and answers `gaia` commands on that machine
+by passing them to the host. So `gaia nodes` lists every machine wherever
+you run it.
+
+```sh
+# Once: join the tailnet with an auth key (as for the host).
+GAIA_AUTHKEY=tskey-auth-… gaia node --host my-host --join
+
+# Every start after that needs no key.
+gaia node --host my-host
+```
+
+- **`--host NAME`** is the host's tailnet name: its MagicDNS name, the first
+  label of it, or its tailnet IP. The host's allowlist must admit the node
+  (for example `--allow tag:gaia`, or `node:NAME` per machine).
+- **`--name NAME`** is the node's name in the registry and on the tailnet.
+  It defaults to the machine name. Names use `a-z`, `0-9` and `-`. Each
+  machine keeps its name: another machine cannot register under it.
+- **Heartbeats.** The host sets the interval (`gaia host
+  --heartbeat-interval 10s`, the default) and marks a node `offline` after
+  `--missed-heartbeats` (default 3) intervals without one. A node keeps
+  running while the host is down, retries with backoff, and registers again
+  when the host returns. Restarted with the same state directory, a node
+  keeps its id.
+- **Versions.** The host accepts nodes at its own API version and one
+  behind. Any other node is refused, with the command that fixes it.
+- **State.** A node's state directory holds only the tailnet client's state
+  (`<state>/tsnet`): no auth key and no credentials.
+- **Removing a machine.** `gaia nodes remove NAME` removes a retired
+  machine. A node still running registers again at its next heartbeat, so
+  stop `gaia node` on it first.
+
 ## Contributing and security
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities privately as

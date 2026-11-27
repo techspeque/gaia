@@ -1,0 +1,403 @@
+package node
+
+import (
+	"bytes"
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
+	"math/big"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/techspeque/gaia/internal/core"
+	"github.com/techspeque/gaia/internal/host"
+	gnet "github.com/techspeque/gaia/internal/net"
+	"github.com/techspeque/gaia/internal/store"
+)
+
+// onePeer names every connection as the same tailnet peer.
+type onePeer gnet.Peer
+
+func (p onePeer) WhoIs(context.Context, string) (gnet.Peer, error) { return gnet.Peer(p), nil }
+
+// startHost serves a real host registry's tailnet handler over plain HTTP,
+// every caller being the peer node-a.
+func startHost(t *testing.T, opts host.Options) (*host.Server, *Client) {
+	t.Helper()
+	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if opts.Allowlist, err = host.ParseAllowlist([]string{"tag:gaia"}); err != nil {
+		t.Fatal(err)
+	}
+	if opts.Version == "" {
+		opts.Version = "v1.2.3"
+	}
+	s := host.New(st, opts)
+	srv := httptest.NewServer(s.TailnetHandler(onePeer{NodeName: "node-a", Tags: []string{"tag:gaia"}, StableID: "nA"}))
+	t.Cleanup(srv.Close)
+	return s, &Client{HTTP: srv.Client(), BaseURL: srv.URL}
+}
+
+func listOf(t *testing.T, s *host.Server) []core.Node {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, core.NodesPath, nil))
+	var l core.ListNodesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &l); err != nil {
+		t.Fatal(err)
+	}
+	return l.Nodes
+}
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		if cond() {
+			return
+		}
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+func TestRunAgainstHost(t *testing.T) {
+	s, c := startHost(t, host.Options{HeartbeatInterval: 20 * time.Millisecond, MissedHeartbeats: 2})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, RunConfig{Host: c, Request: Request("node-a", "v1.2.3"), MinBackoff: time.Millisecond})
+	}()
+
+	var first core.Node
+	waitFor(t, "registration", func() bool {
+		l := listOf(t, s)
+		if len(l) == 1 {
+			first = l[0]
+		}
+		return len(l) == 1
+	})
+	if first.TailnetIdentity != "nA" || first.Name != "node-a" || first.APIVersion != core.APIVersion {
+		t.Errorf("registered %+v", first)
+	}
+	waitFor(t, "a heartbeat", func() bool {
+		l := listOf(t, s)
+		return len(l) == 1 && l[0].LastSeen.After(first.LastSeen)
+	})
+	if l := listOf(t, s); l[0].State != core.NodeOnline || l[0].ID != first.ID {
+		t.Errorf("after heartbeats %+v", l[0])
+	}
+
+	// Removed while running: the next heartbeat is not_found and the node
+	// registers again.
+	if _, err := s.RemoveNode(context.Background(), "node-a"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "registration again", func() bool { return len(listOf(t, s)) == 1 })
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Run returned %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not stop")
+	}
+}
+
+func TestRunRefusedTwoVersionsBehind(t *testing.T) {
+	_, c := startHost(t, host.Options{APIVersion: core.APIVersion + 2, Version: "v9.0.0"})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := Run(ctx, RunConfig{Host: c, Request: Request("node-a", "v1.2.3")})
+	var ce *core.Error
+	if !errors.As(err, &ce) || ce.Code != core.CodeVersionMismatch {
+		t.Fatalf("Run = %v, want version_mismatch", err)
+	}
+	if !strings.Contains(ce.Message, "install gaia v9.0.0 on the node") {
+		t.Errorf("message lacks the upgrade instruction: %q", ce.Message)
+	}
+	if ctx.Err() != nil {
+		t.Error("Run retried a version refusal instead of returning it")
+	}
+}
+
+func TestRunOneVersionBehindAccepted(t *testing.T) {
+	s, c := startHost(t, host.Options{APIVersion: core.APIVersion + 1})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = Run(ctx, RunConfig{Host: c, Request: Request("node-a", "v1")}) }()
+	waitFor(t, "registration", func() bool { return len(listOf(t, s)) == 1 })
+}
+
+// flakyHost fails registration and heartbeats on cue.
+type flakyHost struct {
+	mu            sync.Mutex
+	failRegisters int // the next n registrations fail
+	failBeat      bool
+	registers     []time.Time
+	beats         int
+}
+
+var errDown = errors.New("connection refused")
+
+func (f *flakyHost) Register(_ context.Context, req core.RegisterNodeRequest) (core.RegisterNodeResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.registers = append(f.registers, time.Now())
+	if f.failRegisters > 0 {
+		f.failRegisters--
+		return core.RegisterNodeResponse{}, errDown
+	}
+	return core.RegisterNodeResponse{Node: core.Node{ID: id(1), Name: req.Name}, HeartbeatIntervalMS: 5}, nil
+}
+
+func (f *flakyHost) Heartbeat(context.Context, core.HeartbeatRequest) (core.HeartbeatResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.beats++
+	if f.failBeat {
+		return core.HeartbeatResponse{}, errDown
+	}
+	return core.HeartbeatResponse{}, nil
+}
+
+func (f *flakyHost) snapshot() ([]time.Time, int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]time.Time(nil), f.registers...), f.beats
+}
+
+func TestRunBacksOffWhileHostDown(t *testing.T) {
+	f := &flakyHost{failRegisters: 5}
+	var logs bytes.Buffer
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, RunConfig{Host: f, Request: Request("n", "v1"),
+			MinBackoff: 10 * time.Millisecond, MaxBackoff: 40 * time.Millisecond,
+			Logger: logger(&logs)})
+	}()
+	waitFor(t, "registration and heartbeats", func() bool { r, b := f.snapshot(); return len(r) == 6 && b >= 2 })
+	regs, _ := f.snapshot()
+	// Waits: 10, 20, 40, 40, 40 ms.
+	for i, min := range []time.Duration{10, 20, 40, 40, 40} {
+		if gap := regs[i+1].Sub(regs[i]); gap < min*time.Millisecond {
+			t.Errorf("gap %d = %s, want at least %dms", i, gap, min)
+		}
+	}
+
+	// The host goes away after registration: heartbeats fail, the node
+	// registers again (and keeps trying), and never returns.
+	f.mu.Lock()
+	f.failBeat, f.failRegisters = true, 3
+	f.mu.Unlock()
+	waitFor(t, "registration after a failed heartbeat", func() bool { r, _ := f.snapshot(); return len(r) >= 10 })
+	select {
+	case err := <-done:
+		t.Fatalf("Run returned %v while the host was down", err)
+	default:
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("Run = %v after cancel", err)
+	}
+	if !strings.Contains(logs.String(), "registration with the host failed; retrying") ||
+		!strings.Contains(logs.String(), "heartbeat failed; registering again") {
+		t.Errorf("logs:\n%s", logs.String())
+	}
+}
+
+func TestHandler(t *testing.T) {
+	type seen struct{ method, path, body, query string }
+	got := make(chan seen, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got <- seen{r.Method, r.URL.Path, string(b), r.URL.RawQuery}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTeapot)
+		_, _ = io.WriteString(w, `{"from":"host"}`)
+	}))
+	defer upstream.Close()
+	base, _ := url.Parse(upstream.URL)
+	h := Handler(Forwarder(base, http.DefaultTransport, "gaia-host", nil))
+
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
+		return rec
+	}
+
+	if rec := call(http.MethodGet, core.HealthzPath, ""); rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != `{"status":"ok"}` {
+		t.Errorf("healthz %d %s", rec.Code, rec.Body)
+	}
+	select {
+	case s := <-got:
+		t.Fatalf("healthz was forwarded: %+v", s)
+	default:
+	}
+
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodGet, core.NodesPath, ""},
+		{http.MethodGet, core.VersionPath + "?x=1", ""},
+		{http.MethodDelete, core.NodePath("node-b"), ""},
+		{http.MethodPut, core.NodesPath, `{"a":1}`},
+	} {
+		rec := call(c.method, c.path, c.body)
+		if rec.Code != http.StatusTeapot || rec.Body.String() != `{"from":"host"}` {
+			t.Errorf("%s %s: %d %s", c.method, c.path, rec.Code, rec.Body)
+			continue
+		}
+		s := <-got
+		p, q, _ := strings.Cut(c.path, "?")
+		if s.method != c.method || s.path != p || s.query != q || s.body != c.body {
+			t.Errorf("forwarded %+v for %+v", s, c)
+		}
+	}
+
+	for _, c := range []struct{ method, path string }{
+		{http.MethodPost, core.NodesPath},
+		{http.MethodPost, core.HeartbeatPath},
+		{http.MethodGet, core.HeartbeatPath},
+		{http.MethodGet, "/"},
+		{http.MethodGet, "/api/v2/nodes"},
+	} {
+		if rec := call(c.method, c.path, "{}"); rec.Code != http.StatusNotFound {
+			t.Errorf("%s %s: %d, want 404", c.method, c.path, rec.Code)
+		}
+	}
+	select {
+	case s := <-got:
+		t.Errorf("forwarded %+v", s)
+	default:
+	}
+}
+
+func TestForwarderHostUnreachable(t *testing.T) {
+	down := roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("no route to host") })
+	base, _ := url.Parse("https://gaia-host")
+	var logs bytes.Buffer
+	h := Handler(Forwarder(base, down, "gaia-host", logger(&logs)))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, core.NodesPath, nil))
+	var e core.ErrorResponse
+	if rec.Code != http.StatusServiceUnavailable || json.Unmarshal(rec.Body.Bytes(), &e) != nil ||
+		e.Error.Code != core.CodeUnavailable || !strings.Contains(e.Error.Message, "gaia-host is unreachable") {
+		t.Errorf("%d %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(logs.String(), "forwarding to the host failed") {
+		t.Errorf("not logged: %s", logs.String())
+	}
+}
+
+func logger(w io.Writer) *slog.Logger { return slog.New(slog.NewTextHandler(w, nil)) }
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestVerifyHost(t *testing.T) {
+	self := makeCert(t, nil, []string{"100.64.0.1"}, nil)
+	if err := verifyHost([]*x509.Certificate{self}, "gaia-host.tail.ts.net", "100.64.0.1"); err != nil {
+		t.Errorf("self-signed naming the address: %v", err)
+	}
+	if err := verifyHost([]*x509.Certificate{self}, "", "100.64.0.1"); err != nil {
+		t.Errorf("self-signed, no server name: %v", err)
+	}
+	if err := verifyHost([]*x509.Certificate{self}, "gaia-host.tail.ts.net", "100.64.0.2"); err == nil {
+		t.Error("self-signed certificate for another address accepted")
+	}
+	caKey, ca := makeCA(t)
+	issued := makeCert(t, []string{"gaia-host.tail.ts.net"}, []string{"100.64.0.1"}, &signer{ca, caKey})
+	if err := verifyHost([]*x509.Certificate{issued, ca}, "gaia-host.tail.ts.net", "100.64.0.1"); err == nil {
+		t.Error("a certificate from an untrusted CA accepted")
+	}
+	if err := verifyHost(nil, "x", "100.64.0.1"); err == nil {
+		t.Error("no certificate accepted")
+	}
+}
+
+type signer struct {
+	cert *x509.Certificate
+	key  *ecdsa.PrivateKey
+}
+
+func makeCA(t *testing.T) (*ecdsa.PrivateKey, *x509.Certificate) {
+	t.Helper()
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test CA"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _ := x509.ParseCertificate(der)
+	return key, c
+}
+
+func makeCert(t *testing.T, dns, ips []string, by *signer) *x509.Certificate {
+	t.Helper()
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "gaia"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true, DNSNames: dns}
+	for _, ip := range ips {
+		tmpl.IPAddresses = append(tmpl.IPAddresses, net.ParseIP(ip))
+	}
+	parent, signKey := tmpl, key
+	if by != nil {
+		parent, signKey = by.cert, by.key
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, parent, &key.PublicKey, signKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _ := x509.ParseCertificate(der)
+	return c
+}
+
+func TestMachineName(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"Build-Box.local", "build-box"},
+		{"laptop", "laptop"},
+		{"Adam's_MacBook", "adam-s-macbook"},
+		{"-x-", "x"},
+		{"...", ""},
+		{strings.Repeat("a", 70), strings.Repeat("a", 63)},
+		{strings.Repeat("a", 62) + "_b", strings.Repeat("a", 62)},
+	} {
+		in, want := c.in, c.want
+		got := MachineName(in)
+		if got != want {
+			t.Errorf("MachineName(%q) = %q, want %q", in, got, want)
+		}
+		if got != "" && core.ValidNodeName(got) != nil {
+			t.Errorf("MachineName(%q) = %q is not a valid node name", in, got)
+		}
+	}
+}
+
+func TestRequest(t *testing.T) {
+	r := Request("node-a", "v2")
+	if r.Name != "node-a" || r.TailnetIdentity != "" || r.APIVersion != core.APIVersion || r.GaiaVersion != "v2" {
+		t.Errorf("Request = %+v", r)
+	}
+}

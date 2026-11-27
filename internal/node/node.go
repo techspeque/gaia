@@ -1,7 +1,9 @@
-// Package node runs the node role. In this phase that is the in-process
-// node of `gaia host --node`: it registers the host's own machine and keeps
-// its last_seen current. The remote node, supervisor client and forwarder
-// come in later slices.
+// Package node runs the node role: the in-process node of
+// `gaia host --node` (RunLocal), which registers the host's own machine,
+// and the node on another machine (`gaia node`), which registers with the
+// host over the tailnet, heartbeats (Run) and forwards its local socket's
+// API requests to the host (Handler, Forwarder). This package does not
+// touch tsnet: the caller supplies the connection to the host.
 package node
 
 import (
@@ -41,19 +43,34 @@ func LocalRequest(gaiaVersion string) core.RegisterNodeRequest {
 	}
 }
 
-// localName is the hostname up to its first dot, or "local".
+// localName is MachineName of the hostname, or "local".
 func localName() string {
 	h, err := os.Hostname()
 	if err != nil {
 		return "local"
 	}
-	if i := strings.IndexByte(h, '.'); i >= 0 {
-		h = h[:i]
+	if n := MachineName(h); n != "" {
+		return n
 	}
-	if h == "" {
-		return "local"
+	return "local"
+}
+
+// MachineName turns a hostname into a node name that passes
+// core.ValidNodeName: its first label, lower case, with every character
+// outside a-z, 0-9 and '-' replaced by '-', cut to 63 characters, with no
+// leading or trailing '-'. It is "" when nothing is left.
+func MachineName(hostname string) string {
+	h, _, _ := strings.Cut(strings.ToLower(hostname), ".")
+	b := []byte(h)
+	for i, c := range b {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') {
+			b[i] = '-'
+		}
 	}
-	return h
+	if len(b) > 63 {
+		b = b[:63]
+	}
+	return strings.Trim(string(b), "-")
 }
 
 // RunLocal registers req with r, then heartbeats every interval until ctx

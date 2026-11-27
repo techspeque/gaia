@@ -110,6 +110,12 @@ func startDaemon(t *testing.T, xdg string, args ...string) *daemon {
 // startDaemonEnv is startDaemon with env added to the child's environment.
 func startDaemonEnv(t *testing.T, xdg string, env []string, args ...string) *daemon {
 	t.Helper()
+	return startRole(t, "host", xdg, env, args...)
+}
+
+// startRole starts `gaia <role>` as startDaemonEnv starts the host.
+func startRole(t *testing.T, role, xdg string, env []string, args ...string) *daemon {
+	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +124,7 @@ func startDaemonEnv(t *testing.T, xdg string, env []string, args ...string) *dae
 		args = append(args, "--state", filepath.Join(t.TempDir(), "state"))
 	}
 	d := &daemon{rtDir: filepath.Join(xdg, "gaia"), stderr: &lockedBuffer{}, exited: make(chan struct{})}
-	d.cmd = exec.Command(exe, append([]string{"host"}, args...)...)
+	d.cmd = exec.Command(exe, append([]string{role}, args...)...)
 	d.cmd.Env = append(append(os.Environ(), runMainEnv+"=1", "XDG_RUNTIME_DIR="+xdg), env...)
 	d.cmd.Stderr = d.stderr
 	if err := d.cmd.Start(); err != nil {

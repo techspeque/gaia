@@ -194,7 +194,20 @@ func TestMethodAndPathErrors(t *testing.T) {
 		}
 		wantErrorBody(t, body, core.CodeInvalidArgument)
 	}
-	for _, p := range []string{"/", "/api/v1/nope", "/api/v2/nodes", core.NodesPath + "/x"} {
+	// The node's own routes are not on the socket.
+	for _, p := range []string{core.HeartbeatPath} {
+		res, body := do(t, s.Handler(), http.MethodPost, p)
+		if res.StatusCode != http.StatusNotFound {
+			t.Errorf("POST %s on the socket: %d", p, res.StatusCode)
+		}
+		wantErrorBody(t, body, core.CodeNotFound)
+	}
+	res, body := do(t, s.Handler(), http.MethodGet, core.NodePath("x"))
+	if res.StatusCode != http.StatusMethodNotAllowed || res.Header.Get("Allow") != "DELETE" {
+		t.Errorf("GET %s: %d allow %q", core.NodePath("x"), res.StatusCode, res.Header.Get("Allow"))
+	}
+	wantErrorBody(t, body, core.CodeInvalidArgument)
+	for _, p := range []string{"/", "/api/v1/nope", "/api/v2/nodes", core.NodesPath + "/x/y"} {
 		res, body := do(t, s.Handler(), http.MethodGet, p)
 		if res.StatusCode != http.StatusNotFound {
 			t.Errorf("GET %s: %d", p, res.StatusCode)
@@ -252,3 +265,54 @@ func TestServeShutsDownOnCancel(t *testing.T) {
 		t.Error("still serving after shutdown")
 	}
 }
+
+// TestServeClosesStuckConnections covers a connection that outlives the
+// shutdown grace period (a request whose headers never finish): Serve cuts
+// it, logs, and still returns nil.
+func TestServeClosesStuckConnections(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out the shutdown grace period")
+	}
+	s, _ := newServer(t)
+	var logs bytes.Buffer
+	var mu sync.Mutex
+	s.log = slog.New(slog.NewJSONHandler(writerFunc(func(p []byte) (int, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return logs.Write(p)
+	}), nil))
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Serve(ctx, l) }()
+	c, err := net.Dial("tcp", l.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := c.Write([]byte("GET " + core.HealthzPath + " HTTP/1.1\r\nHost: x\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond) // the server reads the partial request
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Serve: %v", err)
+		}
+	case <-time.After(shutdownTimeout + 5*time.Second):
+		t.Fatal("Serve did not return")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(logs.String(), "closing them") {
+		t.Errorf("no warning logged: %s", logs.String())
+	}
+}
+
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }

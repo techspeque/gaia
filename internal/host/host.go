@@ -13,9 +13,14 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/techspeque/gaia/internal/core"
@@ -48,6 +53,9 @@ type Options struct {
 	// Allowlist names the tailnet peers TailnetHandler admits. Default:
 	// no one.
 	Allowlist Allowlist
+	// APIVersion is the API version this host speaks and reports. Nodes at
+	// it and one behind may register. Default: core.APIVersion.
+	APIVersion int
 }
 
 // Server is the host's registry and API.
@@ -70,6 +78,9 @@ func New(st *store.Store, opts Options) *Server {
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.New(slog.DiscardHandler)
+	}
+	if opts.APIVersion <= 0 {
+		opts.APIVersion = core.APIVersion
 	}
 	return &Server{st: st, opts: opts, log: opts.Logger}
 }
@@ -105,6 +116,14 @@ func (s *Server) serve(ctx context.Context, l net.Listener, h http.Handler) erro
 	sctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	err := srv.Shutdown(sctx)
+	if errors.Is(err, context.DeadlineExceeded) {
+		// Requests in flight had their grace period. What is left is cut,
+		// typically a tailnet connection a node opened and abandoned
+		// before its TLS handshake, which would hold until the handshake
+		// timeout.
+		s.log.Warn("connections still open after the shutdown grace period; closing them")
+		err = srv.Close()
+	}
 	if serr := <-errc; !errors.Is(serr, http.ErrServerClosed) && serr != nil {
 		err = errors.Join(err, serr)
 	}
@@ -137,43 +156,112 @@ func (s *Server) TailnetHandler(w WhoIser) http.Handler {
 			s.log.Warn("tailnet request refused: peer not allowlisted", "remote_addr", r.RemoteAddr,
 				"login", peer.LoginName, "node", peer.NodeName, "tags", peer.Tags)
 		default:
-			api.ServeHTTP(rw, r)
+			api.ServeHTTP(rw, r.WithContext(context.WithValue(r.Context(), peerKey{}, peer)))
 			return
 		}
 		writeError(rw, http.StatusForbidden, core.NewError(core.CodeForbidden, "permission denied"))
 	}))
 }
 
-// routes returns the API routes, with /healthz when healthz is set.
-func (s *Server) routes(healthz bool) *http.ServeMux {
+// routes returns the API routes. The socket mux adds /healthz; the
+// tailnet mux adds the node's own registration and heartbeat, which need
+// the peer identity TailnetHandler puts in the request context.
+func (s *Server) routes(socket bool) *http.ServeMux {
 	mux := http.NewServeMux()
-	if healthz {
-		mux.HandleFunc(core.HealthzPath, s.get(s.healthz))
+	if socket {
+		mux.HandleFunc(core.HealthzPath, s.methods(map[string]handler{http.MethodGet: s.healthz}))
 	}
-	mux.HandleFunc(core.VersionPath, s.get(s.version))
-	mux.HandleFunc(core.NodesPath, s.get(s.listNodes))
+	mux.HandleFunc(core.VersionPath, s.methods(map[string]handler{http.MethodGet: s.version}))
+	nodes := map[string]handler{http.MethodGet: s.listNodes}
+	if !socket {
+		nodes[http.MethodPost] = s.registerHTTP
+		mux.HandleFunc(core.HeartbeatPath, s.methods(map[string]handler{http.MethodPost: s.heartbeatHTTP}))
+	}
+	mux.HandleFunc(core.NodesPath, s.methods(nodes))
+	mux.HandleFunc(core.NodesPath+"/{name}", s.methods(map[string]handler{http.MethodDelete: s.removeHTTP}))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, core.NewError(core.CodeNotFound, "no such endpoint"))
 	})
 	return mux
 }
 
-func (s *Server) get(h func(*http.Request) (any, error)) http.HandlerFunc {
+// handler answers one request with a body to encode as JSON, or an error.
+type handler func(*http.Request) (any, error)
+
+// methods dispatches on the request method; GET also answers HEAD. Any
+// other method is 405 with the Allow header.
+func (s *Server) methods(hs map[string]handler) http.HandlerFunc {
+	allow := make([]string, 0, len(hs)+1)
+	for m := range hs {
+		allow = append(allow, m)
+	}
+	if _, ok := hs[http.MethodGet]; ok {
+		allow = append(allow, http.MethodHead)
+	}
+	slices.Sort(allow)
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			w.Header().Set("Allow", "GET, HEAD")
+		m := r.Method
+		if m == http.MethodHead {
+			m = http.MethodGet
+		}
+		h, ok := hs[m]
+		if !ok {
+			w.Header().Set("Allow", strings.Join(allow, ", "))
 			writeError(w, http.StatusMethodNotAllowed,
 				core.NewError(core.CodeInvalidArgument, "method "+r.Method+" not allowed"))
 			return
 		}
-		body, err := h(r)
-		if err != nil {
-			s.log.Error("request failed", "method", r.Method, "path", r.URL.Path, "err", err)
-			writeError(w, http.StatusInternalServerError, core.NewError(core.CodeInternal, "internal error"))
-			return
-		}
-		writeJSON(w, http.StatusOK, body)
+		s.respond(w, r, h)
 	}
+}
+
+// respond runs h and writes its body, or its error. A typed *core.Error
+// other than internal is the caller's to see and is sent with its status;
+// any other error is logged and answered with a generic internal error, so
+// no detail leaks.
+func (s *Server) respond(w http.ResponseWriter, r *http.Request, h handler) {
+	body, err := h(r)
+	if err == nil {
+		writeJSON(w, http.StatusOK, body)
+		return
+	}
+	var ce *core.Error
+	if errors.As(err, &ce) && ce.Code != core.CodeInternal {
+		writeError(w, statusFor(ce.Code), ce)
+		return
+	}
+	s.log.Error("request failed", "method", r.Method, "path", r.URL.Path, "err", err)
+	writeError(w, http.StatusInternalServerError, core.NewError(core.CodeInternal, "internal error"))
+}
+
+// statusFor maps an error code to its HTTP status.
+func statusFor(c core.ErrorCode) int {
+	switch c {
+	case core.CodeInvalidArgument:
+		return http.StatusBadRequest
+	case core.CodeUnauthorized:
+		return http.StatusUnauthorized
+	case core.CodeForbidden:
+		return http.StatusForbidden
+	case core.CodeNotFound:
+		return http.StatusNotFound
+	case core.CodeConflict, core.CodeVersionMismatch:
+		return http.StatusConflict
+	case core.CodeUnavailable:
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusInternalServerError
+}
+
+// maxRequestBody bounds a request body the API decodes.
+const maxRequestBody = 64 << 10
+
+// decode reads r's JSON body into v.
+func decode(r *http.Request, v any) error {
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxRequestBody)).Decode(v); err != nil {
+		return core.NewError(core.CodeInvalidArgument, "the request body is not valid JSON for "+r.URL.Path)
+	}
+	return nil
 }
 
 func (s *Server) healthz(*http.Request) (any, error) {
@@ -181,7 +269,72 @@ func (s *Server) healthz(*http.Request) (any, error) {
 }
 
 func (s *Server) version(*http.Request) (any, error) {
-	return core.VersionResponse{APIVersion: core.APIVersion, GaiaVersion: s.opts.Version}, nil
+	return core.VersionResponse{APIVersion: s.opts.APIVersion, GaiaVersion: s.opts.Version}, nil
+}
+
+// peerKey is the request-context key of the tailnet peer.
+type peerKey struct{}
+
+// peerFrom returns the tailnet peer TailnetHandler admitted.
+func peerFrom(r *http.Request) (gnet.Peer, bool) {
+	p, ok := r.Context().Value(peerKey{}).(gnet.Peer)
+	return p, ok
+}
+
+// peerIdentity is the node identity of an admitted peer: its stable id.
+// The handlers that need it run only on the tailnet mux.
+func peerIdentity(r *http.Request) (string, error) {
+	p, ok := peerFrom(r)
+	if !ok || p.StableID == "" {
+		return "", core.NewError(core.CodeForbidden, "permission denied")
+	}
+	return p.StableID, nil
+}
+
+// registerHTTP registers the calling peer. Its tailnet identity is the
+// peer's, from WhoIs; the body's is ignored.
+func (s *Server) registerHTTP(r *http.Request) (any, error) {
+	ident, err := peerIdentity(r)
+	if err != nil {
+		return nil, err
+	}
+	var req core.RegisterNodeRequest
+	if err := decode(r, &req); err != nil {
+		return nil, err
+	}
+	req.TailnetIdentity = ident
+	n, err := s.Register(r.Context(), req)
+	if err != nil {
+		return nil, err
+	}
+	return core.RegisterNodeResponse{Node: n, HeartbeatIntervalMS: s.opts.HeartbeatInterval.Milliseconds()}, nil
+}
+
+// heartbeatHTTP records a heartbeat from the calling peer, which must be
+// the node it names.
+func (s *Server) heartbeatHTTP(r *http.Request) (any, error) {
+	ident, err := peerIdentity(r)
+	if err != nil {
+		return nil, err
+	}
+	var req core.HeartbeatRequest
+	if err := decode(r, &req); err != nil {
+		return nil, err
+	}
+	n, err := s.heartbeat(r.Context(), req, ident)
+	if err != nil {
+		return nil, err
+	}
+	return core.HeartbeatResponse{Node: n}, nil
+}
+
+// removeHTTP removes the node named by the path.
+func (s *Server) removeHTTP(r *http.Request) (any, error) {
+	n, err := s.RemoveNode(r.Context(), r.PathValue("name"))
+	if err != nil {
+		return nil, err
+	}
+	return core.RemoveNodeResponse{Node: n}, nil
 }
 
 func (s *Server) listNodes(r *http.Request) (any, error) {
@@ -217,10 +370,19 @@ func (s *Server) apiNode(n store.Node, now time.Time) core.Node {
 }
 
 // Register records a node. A tailnet identity already registered updates
-// that node, keeping its id; otherwise a new node is created.
+// that node, keeping its id; otherwise a new node is created. A node whose
+// API version the host does not serve is a core.CodeVersionMismatch error
+// that says what to upgrade; a name another identity holds is
+// core.CodeConflict.
 func (s *Server) Register(ctx context.Context, req core.RegisterNodeRequest) (core.Node, error) {
-	if req.Name == "" || req.TailnetIdentity == "" {
+	if req.TailnetIdentity == "" {
 		return core.Node{}, core.NewError(core.CodeInvalidArgument, "name and tailnet identity are required")
+	}
+	if err := core.ValidNodeName(req.Name); err != nil {
+		return core.Node{}, err
+	}
+	if err := s.negotiate(req); err != nil {
+		return core.Node{}, err
 	}
 	now := s.opts.Now().UTC()
 	n := store.Node{
@@ -253,8 +415,67 @@ func (s *Server) Register(ctx context.Context, req core.RegisterNodeRequest) (co
 	return s.apiNode(n, now), nil
 }
 
+// negotiate accepts a node at the host's API version or one behind (never
+// below 1), and otherwise returns the version error with the instruction.
+func (s *Server) negotiate(req core.RegisterNodeRequest) error {
+	hostV, nodeV := s.opts.APIVersion, req.APIVersion
+	oldest := max(1, hostV-1)
+	if nodeV >= oldest && nodeV <= hostV {
+		return nil
+	}
+	hostGaia := s.opts.Version
+	if hostGaia == "" {
+		hostGaia = "unknown version"
+	}
+	var msg string
+	if nodeV > hostV {
+		msg = fmt.Sprintf("node %q speaks API v%d, newer than the host (gaia %s, API v%d): upgrade gaia on the host to the node's version (%s) and restart `gaia host`",
+			req.Name, nodeV, hostGaia, hostV, orUnknown(req.GaiaVersion))
+	} else {
+		msg = fmt.Sprintf("node %q speaks API v%d; the host (gaia %s) accepts API v%d to v%d: install gaia %s on the node and restart `gaia node`",
+			req.Name, nodeV, hostGaia, oldest, hostV, hostGaia)
+	}
+	return &core.Error{
+		Code:    core.CodeVersionMismatch,
+		Message: msg,
+		Details: map[string]string{
+			"node_api_version":  strconv.Itoa(nodeV),
+			"host_api_version":  strconv.Itoa(hostV),
+			"host_gaia_version": hostGaia,
+		},
+	}
+}
+
+func orUnknown(s string) string {
+	if s == "" {
+		return "unknown version"
+	}
+	return s
+}
+
 // Heartbeat marks the node seen now. An unknown id is core.CodeNotFound.
+// It is the in-process node's; a node on the tailnet heartbeats through
+// the API, where its identity is checked.
 func (s *Server) Heartbeat(ctx context.Context, req core.HeartbeatRequest) (core.Node, error) {
+	return s.heartbeat(ctx, req, "")
+}
+
+// heartbeat is Heartbeat; a non-empty ident must be the node's tailnet
+// identity, else core.CodeForbidden and nothing is recorded.
+func (s *Server) heartbeat(ctx context.Context, req core.HeartbeatRequest, ident string) (core.Node, error) {
+	if req.ID.IsZero() {
+		return core.Node{}, core.NewError(core.CodeInvalidArgument, "heartbeat without a node id")
+	}
+	if ident != "" {
+		n, err := s.st.GetNode(ctx, req.ID)
+		if err != nil {
+			return core.Node{}, err
+		}
+		if n.TailnetIdentity != ident {
+			s.log.Warn("heartbeat refused: peer is not the node", "id", req.ID.String(), "name", n.Name)
+			return core.Node{}, core.NewError(core.CodeForbidden, "permission denied")
+		}
+	}
 	now := s.opts.Now().UTC()
 	if err := s.st.UpdateNodeLastSeen(ctx, req.ID, now); err != nil {
 		return core.Node{}, err
@@ -264,6 +485,33 @@ func (s *Server) Heartbeat(ctx context.Context, req core.HeartbeatRequest) (core
 		return core.Node{}, err
 	}
 	return s.apiNode(n, now), nil
+}
+
+// RemoveNode removes the node called name and returns it as it was. An
+// unknown name is core.CodeNotFound.
+func (s *Server) RemoveNode(ctx context.Context, name string) (core.Node, error) {
+	if err := core.ValidNodeName(name); err != nil {
+		return core.Node{}, err
+	}
+	nodes, err := s.st.ListNodes(ctx)
+	if err != nil {
+		return core.Node{}, err
+	}
+	for _, n := range nodes {
+		if n.Name != name {
+			continue
+		}
+		if err := s.st.RemoveNode(ctx, n.ID); err != nil {
+			return core.Node{}, err
+		}
+		s.log.Info("node removed", "id", n.ID.String(), "name", n.Name)
+		return s.apiNode(n, s.opts.Now()), nil
+	}
+	return core.Node{}, &core.Error{
+		Code:    core.CodeNotFound,
+		Message: fmt.Sprintf("no node named %q", name),
+		Details: map[string]string{"name": name},
+	}
 }
 
 // findByIdentity scans the registry. Registries hold a handful of machines.

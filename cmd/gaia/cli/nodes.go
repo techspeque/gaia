@@ -38,8 +38,12 @@ func usageError(stderr io.Writer, fs *flag.FlagSet, msg string) int {
 	return int(core.ExitUsage)
 }
 
-// Nodes runs `gaia nodes [-o text|json]` and returns the exit code.
+// Nodes runs `gaia nodes [-o text|json]` or `gaia nodes remove NAME` and
+// returns the exit code.
 func Nodes(args []string, env Env) int {
+	if len(args) > 0 && args[0] == "remove" {
+		return nodesRemove(args[1:], env)
+	}
 	fs := flag.NewFlagSet("gaia nodes", flag.ContinueOnError)
 	// The parser's own diagnostic lacks the "gaia: " prefix; discard it and
 	// report the returned error instead.
@@ -48,7 +52,7 @@ func Nodes(args []string, env Env) int {
 	fs.StringVar(&output, "o", "text", "output format: text or json")
 	fs.StringVar(&output, "output", "text", "output format: text or json")
 	usage := func() {
-		fmt.Fprintln(env.Stderr, "usage: gaia nodes [-o text|json]")
+		fmt.Fprintln(env.Stderr, "usage: gaia nodes [-o text|json]\n       gaia nodes remove NAME")
 	}
 	fs.Usage = func() {}
 	err := fs.Parse(args)
@@ -78,6 +82,49 @@ func Nodes(args []string, env Env) int {
 	}
 	if err != nil {
 		return env.Client.Fail(env.Stderr, err)
+	}
+	return 0
+}
+
+// removeUsage is the usage line of `gaia nodes remove`.
+const removeUsage = "usage: gaia nodes remove NAME"
+
+// nodesRemove runs `gaia nodes remove NAME`. An unknown name exits 1.
+func nodesRemove(args []string, env Env) int {
+	usage := func(msg string) int {
+		if msg != "" {
+			fmt.Fprintln(env.Stderr, "gaia: gaia nodes remove: "+msg)
+		}
+		fmt.Fprintln(env.Stderr, removeUsage)
+		return int(core.ExitUsage)
+	}
+	switch {
+	case len(args) == 1 && (args[0] == "-h" || args[0] == "--help" || args[0] == "-help"):
+		fmt.Fprintln(env.Stderr, removeUsage)
+		fmt.Fprintln(env.Stderr, "Removes a retired machine from the registry. A node still running registers again at its next heartbeat: stop `gaia node` there first.")
+		return 0
+	case len(args) == 0:
+		return usage("missing NAME")
+	case len(args) > 1:
+		return usage(fmt.Sprintf("unexpected argument %q", args[1]))
+	}
+	name := args[0]
+	if err := core.ValidNodeName(name); err != nil {
+		var ce *core.Error
+		errors.As(err, &ce)
+		return usage(ce.Message)
+	}
+	n, err := env.Client.RemoveNode(context.Background(), name)
+	if errors.Is(err, core.NewError(core.CodeNotFound, "")) {
+		fmt.Fprintf(env.Stderr, "gaia: no node named %q is registered; `gaia nodes` lists them\n", name)
+		return 1
+	}
+	if err != nil {
+		return env.Client.Fail(env.Stderr, err)
+	}
+	fmt.Fprintf(env.Stdout, "removed node %s (%s)\n", n.Name, n.ID)
+	if n.State == core.NodeOnline {
+		fmt.Fprintf(env.Stdout, "%s was online: it registers again at its next heartbeat unless `gaia node` is stopped on it\n", n.Name)
 	}
 	return 0
 }

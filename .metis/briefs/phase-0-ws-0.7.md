@@ -94,11 +94,19 @@ Design decisions:
 - **Reaching the host:** `gnet.(*Tailnet).LookupPeer(ctx, name)` finds the
   peer named `--host` in the tailnet status (first label of its MagicDNS
   name, or its tailnet IP), and the node dials that peer's IP on 443. TLS
-  1.3: a Tailscale-issued certificate is verified against system roots for
-  the peer's MagicDNS name; the host's self-signed fallback (Headscale) is
-  accepted, because the peer was already authenticated by WireGuard and
-  selected by name from the control server's netmap. TLS is transport
-  encryption here, not the authentication of the host.
+  1.3 with the tailnet IP as server name, so the host serves its kept
+  self-signed certificate (0.6) and never orders a Tailscale certificate
+  over ACME on a node's behalf; the node accepts it when it is self-signed
+  and names that IP (or when a chain verifies against the system roots for
+  the host's MagicDNS name). The peer is already authenticated by WireGuard
+  and selected by name from the control server's netmap; TLS is transport
+  encryption here, not the authentication of the host. Dials are bounded
+  at 5s, so a forwarded CLI request gets "host unreachable" before the CLI
+  times out.
+- **Shutdown:** when the 5s shutdown grace period runs out (a connection a
+  node opened and abandoned before its TLS handshake holds until the
+  handshake timeout), host and node log a warning, close the rest and still
+  exit 0.
 - **Flags:** `gaia node --host NAME [--join] [--state DIR] [--name NAME]
   [--control-url URL] [--auth-key-file PATH]`. `--join` means "join the
   tailnet now with an auth key", read as for the host (0.6: `$GAIA_AUTHKEY`,
@@ -174,4 +182,39 @@ None.
 
 ## Report
 
-Filled at implementation.
+- **Built:** `core` (`HeartbeatPath`, `NodePath`, `ValidNodeName`,
+  `RemoveNodeResponse`, `RegisterNodeResponse.heartbeat_interval_ms`);
+  `host` (register/heartbeat on the tailnet mux with identity from WhoIs,
+  heartbeat identity check, version negotiation via `Options.APIVersion`,
+  `RemoveNode` and `DELETE /api/v1/nodes/{name}`, error → status map,
+  forced close after the shutdown grace); `net` (`Peer.StableID`,
+  `LookupPeer`, `HasState`); `node` (`Client`, `Run` with backoff,
+  `Handler`, `Forwarder`, `HostTransport`, `MachineName`, `Request`);
+  `cmd/gaia` (`gaia node`, host `--heartbeat-interval`/`--missed-heartbeats`,
+  usage); `cli` (`gaia nodes remove NAME`); README "Adding a machine".
+- **Changed during implementation:** TLS server name is the tailnet IP, not
+  the MagicDNS name. With the MagicDNS name the host ordered a Tailscale
+  certificate over ACME per new name (an outbound request to Let's Encrypt;
+  testcontrol panics on the DNS challenge). Brief updated above.
+- **Test limitation:** testcontrol checks the auth key on every
+  registration, even from a known node key (`serveRegister`: `RequireAuthKey
+  != "" && req.Auth.AuthKey != …` → "invalid authkey"); Tailscale and
+  Headscale do not. `TestNodesOverTailnet` therefore runs a control server
+  requiring no key, so the restart without a key can run; the daemons are
+  still given the test key on `--join` and every leak check covers it.
+  `TestJoinWrongAuthKeyFails` (0.6) proves `Join` presents the key.
+- **Tests:** `TestNodesOverTailnet` (host `--tailnet --node` + node-a +
+  node-b: all three listed on the host and through each node; node-a
+  stopped → offline, restarted without key → online, same id; host stopped →
+  node-b running, `/healthz` answers, `gaia nodes` there reports unreachable;
+  host restarted → both re-register, same ids; node state holds only
+  `tsnet/`, no key; no key in stderr/args; no TCP listener outside tsnet);
+  node flag and start checks (start checks in a child behind the tailnet
+  trap, plus `TestNodeTrapIsReal`); host register/heartbeat/negotiation/
+  remove/status tests; node `Run` against a real host handler (heartbeats,
+  re-register after removal, v+2 host refuses with the instruction, v+1
+  accepts), backoff 10→20→40→40→40ms and re-register after failed
+  heartbeats, `Handler`/`Forwarder`, `verifyHost`; CLI remove tests; net
+  `LookupPeer`/`HasState`/`StableID`. `TestNodesOverTailnet` passed 4 of 4
+  runs (~10s each).
+- **Verify:** `make verify` green; `make build-all` produced six binaries.

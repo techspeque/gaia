@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/techspeque/gaia/internal/core"
 	"github.com/techspeque/gaia/internal/host"
@@ -33,15 +34,6 @@ func refuseDaemon(role, goos string, stderr io.Writer) bool {
 	}
 	fmt.Fprintf(stderr, "gaia %s: the daemon roles do not run on Windows yet\n", role)
 	return true
-}
-
-// runNode is the remote node role, which arrives with workstream 0.7.
-func runNode(_ []string, stderr io.Writer, goos string) int {
-	if refuseDaemon("node", goos, stderr) {
-		return 1
-	}
-	fmt.Fprintln(stderr, "gaia node: not available in this version; on a single machine run `gaia host --node`")
-	return 1
 }
 
 // tailnetJoin is internal/net.Join. The start path calls it only with
@@ -85,6 +77,8 @@ func runHost(args []string, stderr io.Writer, goos string) int {
 	fs.Var(&allow, "allow", "tailnet peer allowed to call the API: user@example.com, tag:NAME or node:NAME; repeatable; needs --tailnet")
 	allowFile := fs.String("allow-file", "", "file of allowed tailnet peers, one per line, # comments; needs --tailnet")
 	authKeyFile := fs.String("auth-key-file", "", "file holding the tailnet auth key, not group or other readable (else $GAIA_AUTHKEY or $TS_AUTHKEY); needs --tailnet")
+	beat := fs.Duration("heartbeat-interval", host.DefaultHeartbeatInterval, "how often nodes heartbeat")
+	missed := fs.Int("missed-heartbeats", host.DefaultMissedHeartbeats, "heartbeats a node may miss before it is offline")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -93,6 +87,10 @@ func runHost(args []string, stderr io.Writer, goos string) int {
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintf(stderr, "gaia host: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+	if *beat < 10*time.Millisecond || *missed < 1 {
+		fmt.Fprintln(stderr, "gaia host: --heartbeat-interval must be at least 10ms and --missed-heartbeats at least 1")
 		return 2
 	}
 	if !*withTailnet {
@@ -151,7 +149,8 @@ func runHost(args []string, stderr io.Writer, goos string) int {
 	}
 	defer func() { _ = l.Close() }()
 
-	srv := host.New(st, host.Options{Version: version, Logger: log, Allowlist: tc.allow})
+	srv := host.New(st, host.Options{Version: version, Logger: log, Allowlist: tc.allow,
+		HeartbeatInterval: *beat, MissedHeartbeats: *missed})
 	served := make(chan error, 1)
 	tailnetAddr := ""
 	if *withTailnet {
@@ -174,7 +173,8 @@ func runHost(args []string, stderr io.Writer, goos string) int {
 		go func() { served <- srv.Serve(ctx, l) }()
 	}
 	log.Info("host started", "socket", l.Path(), "state", state, "node", *withNode,
-		"tailnet", *withTailnet, "tailnet_addr", tailnetAddr)
+		"tailnet", *withTailnet, "tailnet_addr", tailnetAddr,
+		"heartbeat_interval", beat.String(), "missed_heartbeats", *missed)
 
 	nodeDone := make(chan error, 1)
 	if *withNode {
@@ -320,18 +320,18 @@ func serveBoth(ctx context.Context, cancel context.CancelFunc, srv *host.Server,
 	return errors.Join(first, <-errs)
 }
 
-// machineName is the first label of the machine's hostname, lower case,
-// the name the host asks the control server for; "gaia-host" when the
-// hostname is unknown.
+// machineName is node.MachineName of the machine's hostname, the name the
+// host asks the control server for; "gaia-host" when the hostname is
+// unknown or has no usable character.
 func machineName(hostname func() (string, error)) string {
 	h, err := hostname()
 	if err != nil {
 		return "gaia-host"
 	}
-	if h, _, _ = strings.Cut(strings.ToLower(h), "."); h == "" {
-		return "gaia-host"
+	if n := node.MachineName(h); n != "" {
+		return n
 	}
-	return h
+	return "gaia-host"
 }
 
 func describeControlURL(u string) string {
@@ -363,7 +363,7 @@ func awaitShutdown(sigDone <-chan struct{}, served, nodeDone <-chan error, stop 
 		}
 	case err := <-nodeDone:
 		if err != nil {
-			log.Error("local node stopped", "err", err)
+			log.Error("node role stopped", "err", err)
 			code = 1
 		}
 	}

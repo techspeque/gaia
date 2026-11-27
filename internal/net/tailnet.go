@@ -49,6 +49,19 @@ type Peer struct {
 	NodeName string
 	// Tags are the node's ACL tags, e.g. tag:gaia.
 	Tags []string
+	// StableID is the node's stable id from the control server. It names
+	// one machine's tailnet membership for as long as its tsnet state lives.
+	StableID string
+}
+
+// stateFile is the file tsnet keeps its state in, inside the tsnet dir.
+const stateFile = "tailscaled.state"
+
+// HasState reports whether the state directory dir holds tsnet state from
+// an earlier join, so Join needs no auth key.
+func HasState(dir string) bool {
+	fi, err := os.Stat(filepath.Join(dir, stateSubdir, stateFile))
+	return err == nil && fi.Mode().IsRegular() && fi.Size() > 0
 }
 
 // Tailnet is a running tsnet node.
@@ -165,7 +178,11 @@ func (t *Tailnet) WhoIs(ctx context.Context, remoteAddr string) (Peer, error) {
 	if res.Node == nil {
 		return Peer{}, fmt.Errorf("tailnet: whois %s: no node", remoteAddr)
 	}
-	p := Peer{NodeName: nodeName(res.Node.Name, res.Node.ComputedName), Tags: slices.Clone(res.Node.Tags)}
+	p := Peer{
+		NodeName: nodeName(res.Node.Name, res.Node.ComputedName),
+		Tags:     slices.Clone(res.Node.Tags),
+		StableID: string(res.Node.StableID),
+	}
 	if !res.Node.IsTagged() && res.UserProfile != nil {
 		p.LoginName = res.UserProfile.LoginName
 	}
@@ -178,6 +195,57 @@ func nodeName(fqdn, computed string) string {
 		return n
 	}
 	return computed
+}
+
+// PeerAddr is where a tailnet peer is reached.
+type PeerAddr struct {
+	// Addr is the peer's tailnet address, IPv4 when it has one.
+	Addr netip.Addr
+	// DNSName is the peer's MagicDNS name without the trailing dot, or ""
+	// when the control server gives none.
+	DNSName string
+}
+
+// LookupPeer finds the peer called name in this node's view of the
+// tailnet: name is a MagicDNS name, its first label (case-insensitive) or
+// one of the peer's tailnet IP addresses. No match, or a short name that
+// matches more than one peer, is an error.
+func (t *Tailnet) LookupPeer(ctx context.Context, name string) (PeerAddr, error) {
+	st, err := t.lc.Status(ctx)
+	if err != nil {
+		return PeerAddr{}, fmt.Errorf("tailnet: status: %w", err)
+	}
+	want := strings.TrimSuffix(strings.ToLower(name), ".")
+	ip, ipErr := netip.ParseAddr(name)
+	var found []PeerAddr
+	for _, p := range st.Peer {
+		dns := strings.TrimSuffix(strings.ToLower(p.DNSName), ".")
+		match := false
+		if ipErr == nil {
+			match = slices.Contains(p.TailscaleIPs, ip)
+		} else {
+			first, _, _ := strings.Cut(dns, ".")
+			match = dns != "" && (want == dns || want == first)
+		}
+		if !match || len(p.TailscaleIPs) == 0 {
+			continue
+		}
+		addr := p.TailscaleIPs[0]
+		for _, a := range p.TailscaleIPs {
+			if a.Is4() {
+				addr = a
+				break
+			}
+		}
+		found = append(found, PeerAddr{Addr: addr, DNSName: dns})
+	}
+	switch len(found) {
+	case 0:
+		return PeerAddr{}, fmt.Errorf("tailnet: no peer named %q", name)
+	case 1:
+		return found[0], nil
+	}
+	return PeerAddr{}, fmt.Errorf("tailnet: %d peers match %q; use the full MagicDNS name or the tailnet IP", len(found), name)
 }
 
 // Dial connects to address over the tailnet.
