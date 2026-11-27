@@ -71,3 +71,12 @@ findings:
       file: metis/briefs/phase-0-ws-0.6.md
       commit: d40345a8974a0f6f7ed8f5e74e78722973f03fd1
       evidence: .metis/briefs/phase-0-ws-0.6.md:64
+    - id: f-007
+      date: "2026-11-27"
+      slice: phase-0-ws-0.7
+      severity: P3
+      category: behavior
+      finding: 'cmd/gaia/node.go:111 — --join without an auth key is accepted whenever HasState is true, contrary to the unconditional rejection in brief lines 111-115. Reproduced with a nonempty tsnet state file and both key variables empty: the child reaches the tailnet trap (exit 97), instead of rejecting the missing key (exit 1). Remove the HasState exception from the --join key check and cover both fresh and existing state in TestNodeStartErrors.'
+      status: open
+      cycle: 1
+      file: cmd/gaia/node.go
