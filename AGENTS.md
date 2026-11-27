@@ -213,7 +213,7 @@ only by `node`.
 - `gaia run --wait` behaves like a local agent process: streamed output, the agent's exit code, stop on interrupt.
 - Gaia never resets, rebases, stashes or force-pushes a checkout.
 - Gaia never chooses the agent, model or slice.
-- Every listener binds to the tailnet, to 127.0.0.1 or to a user-only local socket. Never 0.0.0.0. The only public exposure is the opt-in Funnel link, and it serves only the UI and API.
+- Every listener binds to the tailnet, to 127.0.0.1 or to a user-only local socket. Never 0.0.0.0. The one exception is the embedded tailnet client's WireGuard UDP socket, which is the tailnet transport itself and accepts only authenticated WireGuard. The only public exposure is the opt-in Funnel link, and it serves only the UI and API.
 - Over the public link, typing into or starting a session needs a fresh sign-in check, per session.
 - Defaults are the safe choice: public link off, remote input off, no credentials until added.
 - A session survives the loss of its client, and of the node daemon (ADR-0008).
