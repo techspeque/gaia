@@ -108,7 +108,7 @@ func runNode(args []string, stderr io.Writer, goos string) int {
 		return 1
 	}
 	switch {
-	case *join && key.Reveal() == "" && !gnet.HasState(state):
+	case *join && key.Reveal() == "":
 		fmt.Fprintln(stderr, "gaia node: --join needs a tailnet auth key: set $GAIA_AUTHKEY or $TS_AUTHKEY, or pass --auth-key-file")
 		return 1
 	case !*join && !gnet.HasState(state):

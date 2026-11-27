@@ -52,6 +52,13 @@ func TestNodeStartErrors(t *testing.T) {
 	if err := os.Chmod(open, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	joined := filepath.Join(t.TempDir(), "joined")
+	if err := os.MkdirAll(filepath.Join(joined, "tsnet"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(joined, "tsnet", "tailscaled.state"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	noKey := []string{"GAIA_AUTHKEY=", "TS_AUTHKEY="}
 	for _, c := range []struct {
 		name string
@@ -60,6 +67,7 @@ func TestNodeStartErrors(t *testing.T) {
 		want string
 	}{
 		{"join without a key", noKey, []string{"--join"}, "--join needs a tailnet auth key"},
+		{"join without a key, existing state", noKey, []string{"--join", "--state", joined}, "--join needs a tailnet auth key"},
 		{"no state without join", []string{"GAIA_AUTHKEY=" + testAuthKey}, nil, "holds no tailnet state: run once with --join"},
 		{"open state dir", noKey, []string{"--join", "--state", open}, "chmod 700 it"},
 	} {
