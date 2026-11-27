@@ -11,3 +11,12 @@ findings:
       file: deps_test.go
       commit: 23098aad270ea83f8b53646cf5ba28020cbc394e
       evidence: test TestDependencyRuleRejects
+    - id: f-002
+      date: "2026-11-27"
+      slice: phase-0-ws-0.3
+      severity: P2
+      category: correctness
+      finding: internal/store/store.go:69-76 — A newer user_version present only in an uncheckpointed WAL bypasses the header check; Open then returns version_mismatch but its writer connection and Close checkpoint gaia.db and remove gaia.db-wal/gaia.db-shm. Reproduced with a version-1 header and committed version-2 WAL, violating brief lines 75-77. Detect the effective newer schema without modifying any original state files and add an Open-level WAL-recovery test asserting byte-identical directory contents on refusal.
+      status: open
+      cycle: 1
+      file: internal/store/store.go
