@@ -91,8 +91,8 @@ Design decisions:
 
 ## Declared file scope
 
-- **owned_paths:** .goreleaser.yaml, .github/workflows/, scripts/, cmd/gaia/release_test.go, install_test.go, testdata/vulnmod/, Makefile, README.md
-- **read_only_paths:** cmd/gaia/, internal/, deps_test.go, go.mod, go.sum, OVERVIEW.md, .metis/adr/
+- **owned_paths:** .goreleaser.yaml, .github/workflows/, scripts/, cmd/gaia/release_test.go, install_test.go, testdata/vulnmod/, Makefile, README.md, go.mod, go.sum
+- **read_only_paths:** cmd/gaia/, internal/, deps_test.go, OVERVIEW.md, .metis/adr/
 
 ## Definition of Done
 
@@ -131,7 +131,12 @@ Design decisions:
 
 ## Out-of-scope touches
 
-None.
+**Decided by the Human, 2026-11-27:** this slice bumps `go.mod` to Go 1.26.11
+and `klauspost/compress` to v1.20.3, because `make vulncheck` is part of
+this slice's gate and fails on known vulnerabilities without them. `go.mod`
+and `go.sum` are now in owned_paths, for those two bumps only. Do not bump
+`tailscale.com` or any other dependency here; record in the Report that the
+newer Go version now permits a newer tsnet, as a follow-up.
 
 ## Report
 
