@@ -32,3 +32,12 @@ findings:
       status: open
       cycle: 1
       file: cmd/gaia/daemon.go
+    - id: f-004
+      date: "2026-11-27"
+      slice: phase-0-ws-0.4
+      severity: P2
+      category: behavior
+      finding: internal/logging/logging.go:65 — Replacing secret bytes across the encoded JSON also replaces unquoted numeric tokens and can corrupt the log record. TestReviewNumericSecretJSON registers secret 123456 and logs count=123456, producing "count":[REDACTED], which json.Valid rejects. Make redaction JSON-aware or redact values before encoding while preserving late-bound secret coverage, and add a numeric-secret regression that asserts valid JSON.
+      status: open
+      cycle: 1
+      file: internal/logging/logging.go
