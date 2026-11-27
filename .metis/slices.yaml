@@ -14,6 +14,10 @@ slices:
       reviewed: false
       review_cycles: 0
       created: ""
+      waiting:
+        reason: 'auto: scope'
+        since: "2026-11-27T15:46:08Z"
+        human: true
     - id: phase-0-ws-0.7
       title: Node role, registration and heartbeat
       type: feat
