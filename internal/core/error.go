@@ -79,7 +79,7 @@ func (e *Error) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &w); err != nil {
 		return err
 	}
-	*e = Error{Code: w.Code, Message: w.Message, Details: w.Details}
+	*e = Error(w)
 	return nil
 }
 
