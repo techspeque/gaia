@@ -60,8 +60,8 @@ Design decisions:
   is the safe choice and an allowlist that admits no one is a misconfig.
 - **`host.Server.TailnetHandler(whois)`**: wraps the `/api/v1` routes (not
   `/healthz`, which stays socket-only) with the WhoIs check: lookup failure
-  or no match → `403` `core.ErrorResponse` (`permission_denied`, generic
-  message) and a `warn` log line with remote addr and peer login/node name;
+  or no match → `403` `core.ErrorResponse` (`core.CodeForbidden`, wire value
+  `forbidden`, generic message) and a `warn` log line with remote addr and peer login/node name;
   a match passes through. `whois` is an interface so the handler is
   unit-tested without tsnet.
 - **Auth key:** `TS_AUTHKEY`/`GAIA_AUTHKEY` environment variable or
