@@ -267,7 +267,7 @@ Acceptance criteria:
 - **Blocked by:** 0.5
 
 Tasks:
-- Add GoReleaser and a release workflow building the six targets on a `v*` tag, with a dry run on manual dispatch
+- Add GoReleaser and a release workflow building the six targets on a `v*` tag, with a dry run on manual dispatch; build with the same tags as the `Makefile` (`ts_omit_peerapiserver`, decided in 0.6), and check the release binary opens no TCP listener on all interfaces after joining a tailnet
 - Publish checksums, keyless cosign signatures and an SBOM with each release (ADR-0012 rule 3)
 - Write `install.sh`, modelled on Metis's and Ship's, that verifies checksum and signature before installing
 - Run `govulncheck` and a licence check in CI

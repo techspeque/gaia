@@ -136,6 +136,16 @@ counted. Plan §0.6, the gate scenario and OVERVIEW §3 are amended to say so.
 The other decisions in this brief (tsnet v1.98.8, log upload disabled,
 empty allowlist refuses to start, auth key from environment or file) stand.
 
+**Second decision, 2026-11-27 (peerapi):** turn it off. tsnet's peerapi
+server opens a TCP listener on all interfaces, and Gaia uses nothing it
+serves, so the exception made for the WireGuard UDP socket is not widened.
+Build with `-tags ts_omit_peerapiserver`. For this, and only this, the
+slice may edit the `Makefile`: add the tag to every target that builds,
+tests or analyses (test, build, build-all, vet, staticcheck), in one
+variable. The listener check stays as strict as written, so a build without
+the tag fails it; say so in the README section. Record in the Report that
+the release build (workstream 0.8) must carry the same tag.
+
 ## Report
 
 Filled at implementation.
