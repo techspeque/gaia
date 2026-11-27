@@ -45,6 +45,11 @@ func Open(ctx context.Context, dir string) (*Store, error) {
 	if hv > len(migs) {
 		return nil, versionMismatch(hv, len(migs))
 	}
+	if wv, ok, err := walVersion(ctx, file); err != nil {
+		return nil, err
+	} else if ok && wv > len(migs) {
+		return nil, versionMismatch(wv, len(migs))
+	}
 	if !existed {
 		// Create the file ourselves so it, and the -wal and -shm files
 		// SQLite derives from it, are 0600.

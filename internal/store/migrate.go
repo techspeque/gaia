@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"time"
@@ -109,6 +110,61 @@ func headerVersion(file string) (version int, exists bool, err error) {
 		}
 	}
 	return int(int32(binary.BigEndian.Uint32(h[60:64]))), true, nil
+}
+
+// walVersion reports the effective user_version of file when a non-empty
+// WAL file sits beside it, as after a crash: committed frames there may hold
+// a version the file header does not show yet. SQLite recovers a WAL on open
+// and checkpoints it on close, so the check runs on copies of the database
+// and WAL in a private temporary directory, leaving the originals untouched.
+// ok is false when there is no WAL to recover.
+func walVersion(ctx context.Context, file string) (version int, ok bool, err error) {
+	fi, err := os.Stat(file + "-wal")
+	if errors.Is(err, fs.ErrNotExist) || (err == nil && fi.Size() == 0) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	tmp, err := os.MkdirTemp("", "gaia-walcheck-")
+	if err != nil {
+		return 0, false, err
+	}
+	defer os.RemoveAll(tmp)
+	cp := filepath.Join(tmp, dbFileName)
+	for _, suffix := range []string{"", "-wal"} {
+		if err := copyFile(file+suffix, cp+suffix); err != nil {
+			return 0, false, err
+		}
+	}
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(cp))
+	if err != nil {
+		return 0, false, err
+	}
+	defer db.Close()
+	v, err := userVersion(ctx, db)
+	if err != nil {
+		return 0, false, err
+	}
+	return v, true, nil
+}
+
+// copyFile copies src to a new file dst at mode 0600.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 func versionMismatch(dbVersion, binaryVersion int) *core.Error {

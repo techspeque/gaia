@@ -176,6 +176,56 @@ func TestNewerSchemaRefusedAndUntouched(t *testing.T) {
 	}
 }
 
+// TestNewerSchemaInWALRefusedAndUntouched covers a crash that left a newer
+// user_version committed in the WAL only: the header still shows the
+// current version, yet Open must refuse and must not checkpoint or remove
+// the WAL.
+func TestNewerSchemaInWALRefusedAndUntouched(t *testing.T) {
+	src := stateDir(t)
+	s := mustOpen(t, src)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(src, dbFileName)
+	db := rawDB(t, file)
+	newer := SchemaVersion() + 1
+	for _, q := range []string{"PRAGMA wal_autocheckpoint = 0", "PRAGMA user_version = " + itoa(newer)} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Copy the database and WAL while the connection is open, as a crash
+	// would leave them.
+	dir := stateDir(t)
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{"", "-wal"} {
+		b, err := os.ReadFile(file + suffix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, dbFileName+suffix), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if hv, _, err := headerVersion(filepath.Join(dir, dbFileName)); err != nil || hv != SchemaVersion() {
+		t.Fatalf("header version = %d, %v; want %d", hv, err, SchemaVersion())
+	}
+
+	before := snapshot(t, dir)
+	_, err := Open(context.Background(), dir)
+	ce := wantCode(t, err, core.CodeVersionMismatch)
+	if ce.Details["db_version"] != itoa(newer) || ce.Details["binary_version"] != itoa(SchemaVersion()) {
+		t.Errorf("details = %v", ce.Details)
+	}
+	after := snapshot(t, dir)
+	if !maps.Equal(before, after) {
+		t.Errorf("state directory changed: before %v files, after %v files",
+			slices.Sorted(maps.Keys(before)), slices.Sorted(maps.Keys(after)))
+	}
+}
+
 // TestNewerSchemaInsideMigration covers the second check: a version the
 // file header does not show yet (still in the WAL) is caught in the
 // migration transaction.
