@@ -8,6 +8,8 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+
+	"github.com/techspeque/gaia/cmd/gaia/cli"
 )
 
 // version and commit are set at build time with
@@ -21,7 +23,8 @@ const usage = `usage: gaia <command> [flags]
 
   host [--state DIR] [--node]   run the host daemon; --node also runs this
                                 machine as a node (local-only mode)
-  --version                     print version, commit and platform
+  nodes [-o text|json]          list the machines registered with the host
+  --version                    print version, commit and platform
 `
 
 func main() {
@@ -42,6 +45,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runHost(args[1:], stderr, runtime.GOOS)
 	case "node":
 		return runNode(args[1:], stderr, runtime.GOOS)
+	case "nodes":
+		return cli.Nodes(args[1:], cliEnv(stdout, stderr))
 	case "-h", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return 0
@@ -49,6 +54,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gaia: unknown command %q\n\n%s", args[0], usage)
 		return 2
 	}
+}
+
+// cliEnv is the environment of the client commands: the default runtime
+// directory and this binary's API and Gaia versions.
+func cliEnv(stdout, stderr io.Writer) cli.Env {
+	return cli.Env{Stdout: stdout, Stderr: stderr, Client: &cli.Client{Version: version}}
 }
 
 // versionString formats the one-line --version output.

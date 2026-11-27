@@ -129,4 +129,25 @@ None.
 
 ## Report
 
-Filled at implementation.
+- Files: `cmd/gaia/main.go` (dispatch `nodes`, usage line);
+  `cmd/gaia/cli/{client,nodes,client_test,nodes_test,graph_test}.go`;
+  `cmd/gaia/nodes_test.go`; `internal/sock/{sock,sock_test}.go`;
+  `testdata/contract/gaia/api-v1/nodes.json`;
+  `testdata/contract/README.md`. `sock_unix.go`, `sock_other.go` and
+  `main_test.go` were declared but needed no change.
+- `make verify` green; `go test -race ./cmd/... ./internal/sock/` green;
+  `go vet ./...` clean with GOOS=windows and GOOS=linux; `make build-all`
+  builds all six targets with CGO off.
+- No-daemon timing is asserted (< 200 ms) in-process in
+  `cli.TestNoDaemon` for a missing runtime dir and an empty one; the child
+  process test `TestNodesNoDaemonBinary` checks exit 90 and the message
+  without a timing bound (process start-up would make it flaky in CI).
+- The import-graph test is an allowlist: within the module only
+  `cmd/gaia/cli`, `internal/core`, `internal/sock`, and nothing from
+  `tailscale.com`, for GOOS linux, darwin and windows. It shells out to
+  `go list -deps`, so the `go` tool must be on PATH when tests run.
+- Non-mismatch daemon errors print as `code: message` (e.g. `internal:
+  internal error`); an unsafe runtime directory exits 99, not 90.
+- `-h` on `gaia nodes` prints usage and exits 0.
+- The live fixture test also checks `tailnet_identity` (`local`),
+  `api_version` and `state` (`online`) against the fixture's values.

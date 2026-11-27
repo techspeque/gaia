@@ -46,10 +46,54 @@ func Dir() string {
 // Path returns the socket path inside the runtime directory dir.
 func Path(dir string) string { return filepath.Join(dir, SocketName) }
 
-// Dial connects to the daemon socket inside dir.
+// ErrNoDaemon wraps every Dial failure that means no daemon answers: the
+// runtime directory or the socket is missing, the connection is refused, or
+// this platform has no local socket.
+var ErrNoDaemon = errors.New("no gaia daemon is running")
+
+// dialTimeout bounds a Dial whose context has no earlier deadline.
+const dialTimeout = time.Second
+
+// Dial connects to the daemon socket inside dir. It refuses a runtime
+// directory another user could have prepared (the same check Listen makes,
+// without creating it), and closes the connection if the peer does not run
+// as this user, so the CLI never talks to someone else's daemon.
 func Dial(ctx context.Context, dir string) (net.Conn, error) {
-	var d net.Dialer
-	return d.DialContext(ctx, "unix", Path(dir))
+	path := Path(dir)
+	if !supported {
+		return nil, fmt.Errorf("%w: the local socket is not supported on this platform yet", ErrNoDaemon)
+	}
+	fi, err := os.Lstat(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("%w: %s does not exist", ErrNoDaemon, dir)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := checkDir(dir, fi); err != nil {
+		return nil, err
+	}
+	d := net.Dialer{Timeout: dialTimeout}
+	c, err := d.DialContext(ctx, "unix", path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) || isRefused(err) {
+			return nil, fmt.Errorf("%w: %w", ErrNoDaemon, err)
+		}
+		return nil, err
+	}
+	uid, err := peerUID(c)
+	if err == nil && uid != os.Getuid() {
+		err = &core.Error{
+			Code:    core.CodeForbidden,
+			Message: fmt.Sprintf("the process on %s runs as uid %d, not as this user", path, uid),
+			Details: map[string]string{"path": path},
+		}
+	}
+	if err != nil {
+		_ = c.Close()
+		return nil, err
+	}
+	return c, nil
 }
 
 // Listener is the daemon's end of the local socket. Accept returns only
@@ -162,6 +206,12 @@ func ensureDir(dir string) error {
 	if err != nil {
 		return err
 	}
+	return checkDir(dir, fi)
+}
+
+// checkDir refuses dir, whose Lstat is fi, unless it is a real directory
+// owned by the current user with no group or other bits.
+func checkDir(dir string, fi fs.FileInfo) error {
 	switch {
 	case fi.Mode()&fs.ModeSymlink != 0:
 		return unsafeDir(dir, fi.Mode(), "is a symbolic link")

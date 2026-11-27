@@ -294,3 +294,64 @@ func TestPeerUIDIsOwn(t *testing.T) {
 		t.Errorf("peer uid %d, want %d", uid, os.Getuid())
 	}
 }
+
+func TestDialNoDaemon(t *testing.T) {
+	// The runtime directory does not exist.
+	missing := runtimeDir(t)
+	if _, err := Dial(context.Background(), missing); !errors.Is(err, ErrNoDaemon) {
+		t.Errorf("missing dir: %v, want ErrNoDaemon", err)
+	}
+	if _, err := os.Lstat(missing); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("Dial created the runtime directory: %v", err)
+	}
+
+	// The directory exists but holds no socket.
+	empty := runtimeDir(t)
+	if err := os.Mkdir(empty, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Dial(context.Background(), empty); !errors.Is(err, ErrNoDaemon) {
+		t.Errorf("missing socket: %v, want ErrNoDaemon", err)
+	}
+
+	// A socket nobody listens on, as a killed daemon leaves it.
+	stale := runtimeDir(t)
+	if err := os.Mkdir(stale, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ul, err := net.ListenUnix("unix", &net.UnixAddr{Name: Path(stale), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ul.SetUnlinkOnClose(false)
+	_ = ul.Close()
+	if _, err := Dial(context.Background(), stale); !errors.Is(err, ErrNoDaemon) {
+		t.Errorf("stale socket: %v, want ErrNoDaemon", err)
+	}
+}
+
+func TestDialRefusesUnsafeDir(t *testing.T) {
+	// A daemon listening in a directory that later became group-readable.
+	dir := runtimeDir(t)
+	l := mustListen(t, dir, Options{})
+	serveOK(l)
+	if err := os.Chmod(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Dial(context.Background(), dir)
+	wantCode(t, err, core.CodeInvalidArgument)
+	if errors.Is(err, ErrNoDaemon) {
+		t.Error("an unsafe directory is reported as no daemon")
+	}
+
+	// A symlink to a good directory with a live daemon.
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(shortDir(t), "link")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Dial(context.Background(), link)
+	wantCode(t, err, core.CodeInvalidArgument)
+}
