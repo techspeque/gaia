@@ -105,4 +105,17 @@ None.
 
 ## Report
 
-Filled at implementation.
+- Files: `internal/store/{doc,store,migrate,node}.go`,
+  `internal/store/migrations/0001_nodes.sql`,
+  `internal/store/{store,node}_test.go`; `go.mod`, `go.sum`.
+- Dependency: `modernc.org/sqlite v1.63.0`. Module resolution also raised
+  `golang.org/x/{mod,sync,tools}` one minor each (shared with the
+  staticcheck tool) and added `golang.org/x/sys` and modernc's indirect deps.
+- `CGO_ENABLED=0 go test ./internal/store/` ok; `make verify` green; the
+  store test binary compiles for all six ADR-0002 targets with CGO off.
+- Additions beyond the brief, same package: `SchemaVersion()` (the binary's
+  schema version, for the host and tests); the node table is `STRICT`; the
+  database file is pre-created at 0600 so SQLite's -wal/-shm files match.
+- The backup happens before the first pending migration, after the writer
+  has opened the file (WAL mode set); the newer-schema refusal happens
+  before any connection opens.
