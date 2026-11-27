@@ -1,0 +1,19 @@
+{
+  "active": true,
+  "id": "phase-0-gate",
+  "title": "Phase 0 gate: composed-system validation",
+  "type": "gate",
+  "priority": "p2",
+  "risk": "high",
+  "role": "Coder",
+  "agent_slug": "claude-code/opus-5-5",
+  "agent_label": "Claude Code (Opus 5.5)",
+  "plan": ".metis/plans/phase-0-plan.md",
+  "plan_section": "Phase Gate",
+  "review_cycles": 0,
+  "reading_rule": "full contract (all sections)",
+  "template": "code",
+  "auto": "gate",
+  "auto_mode": "step",
+  "auto_mode_source": "project"
+}
