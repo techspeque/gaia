@@ -148,4 +148,23 @@ the release build (workstream 0.8) must carry the same tag.
 
 ## Report
 
-Filled at implementation.
+- **Built:** `internal/net` (`Join`, `ListenTLS` with Tailscale cert or
+  kept self-signed fallback, `WhoIs`, `Dial`, `Close`; log upload disabled;
+  tsnet logs through the redacting logger), `internal/net/nettest`
+  (testcontrol + DERP/STUN harness for tests), `host.Allowlist` and
+  `host.Server.TailnetHandler`, `gaia host --tailnet` flags, auth key from
+  `$GAIA_AUTHKEY`/`$TS_AUTHKEY` or `--auth-key-file`, README "Joining a
+  tailnet" section. Dependency `tailscale.com v1.98.8`.
+- **Makefile:** `TAGS := ts_omit_peerapiserver`, passed to vet,
+  staticcheck, test, build and build-all, per the Human's second decision.
+  Without the tag, `TestHostTailnetEndToEnd` fails its listener check
+  (confirmed), as intended.
+- **For workstream 0.8:** the release build must carry the same
+  `ts_omit_peerapiserver` tag.
+- **Tests:** two tsnet servers on testcontrol (dial, TLS, WhoIs, wrong auth
+  key refused, no key in logs); allowlist parse/match; handler 200/403/whois
+  error/no `/healthz`; CLI flag validation, auth key env/file/mode; end-to-end
+  host on the tailnet: allowlisted peer 200, other peer 403 with log line,
+  no auth key in stderr, no TCP listener outside tsnet; trap hook proves
+  `internal/net` is not entered without `--tailnet`.
+- **Verify:** `make verify` and `make build-all` green.

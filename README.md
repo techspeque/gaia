@@ -26,6 +26,50 @@ make verify       # gofmt, go vet, staticcheck, tests
 dist/gaia --version
 ```
 
+Every build, test and analysis uses the build tag `ts_omit_peerapiserver`,
+set once in the `Makefile`. It removes the tailnet client's peer API server,
+which would otherwise open a TCP listener on all interfaces. A build or test
+run without the tag (plain `go test ./...`) fails the check that Gaia opens
+no TCP listener outside the tailnet; use the `make` targets.
+
+## Joining a tailnet
+
+`gaia host --tailnet` joins a tailnet with an embedded Tailscale client and
+serves the API over HTTPS on port 443 of its tailnet address only. Nothing
+is opened on the machine's own network. Without `--tailnet` the host makes no
+network call at all. Tailscale and Headscale work the same way; only the
+control server differs.
+
+```sh
+# Tailscale (the default control server)
+GAIA_AUTHKEY=tskey-auth-… gaia host --tailnet --allow you@example.com
+
+# Headscale, or any other control server
+gaia host --tailnet --control-url https://headscale.example.com \
+  --auth-key-file ~/.config/gaia/authkey --allow tag:gaia
+```
+
+- **Control server.** `--control-url URL` names it. Leave it out for
+  Tailscale's. For Headscale, give the URL of your Headscale server.
+- **Auth key.** Create a key in the Tailscale admin console, or with
+  `headscale preauthkeys create`. Gaia reads it from `$GAIA_AUTHKEY` or
+  `$TS_AUTHKEY`, or from `--auth-key-file PATH` (the file must not be group
+  or other readable). It is never a command-line argument and never logged.
+  After the first join the node key lives in the state directory
+  (`<state>/tsnet`), and later starts need no auth key.
+- **Allowlist.** Every tailnet request is checked against the identity the
+  control server gives the caller. An entry is a login name
+  (`you@example.com`), a tag (`tag:gaia`) or a node name (`node:laptop`).
+  Give entries with `--allow ENTRY` (repeatable) or `--allow-file PATH`, one
+  per line with `#` comments. A caller who matches no entry gets `403` and
+  the host logs a warning. `--tailnet` with an empty allowlist refuses to
+  start.
+- **Certificates.** With Tailscale and HTTPS enabled for the tailnet, the
+  host serves the Tailscale-issued certificate for its MagicDNS name. When
+  none is available (Headscale, or a client using the bare tailnet address),
+  it serves a self-signed certificate made on first start and kept in
+  `<state>/tsnet/gaia-tls.{crt,key}`.
+
 ## Contributing and security
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities privately as

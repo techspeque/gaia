@@ -7,6 +7,11 @@ COMMIT  ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 DIST    := dist
 
+# Build tags for every build, test and analysis. ts_omit_peerapiserver drops
+# tsnet's peerapi server, which would otherwise bind a TCP listener on all
+# interfaces (OVERVIEW §3.3). The release build must carry the same tags.
+TAGS    := ts_omit_peerapiserver
+
 # Release targets, ADR-0002 rule 5.
 PLATFORMS := darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64
 
@@ -20,16 +25,16 @@ fmt-check:
 	@out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "gofmt needed on:"; echo "$$out"; exit 1; fi
 
 vet:
-	$(GO) vet ./...
+	$(GO) vet -tags '$(TAGS)' ./...
 
 staticcheck:
-	$(GO) tool staticcheck ./...
+	$(GO) tool staticcheck -tags '$(TAGS)' ./...
 
 test:
-	CGO_ENABLED=0 $(GO) test ./...
+	CGO_ENABLED=0 $(GO) test -tags '$(TAGS)' ./...
 
 build: cgo-guard
-	CGO_ENABLED=0 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(DIST)/gaia ./cmd/gaia
+	CGO_ENABLED=0 $(GO) build -tags '$(TAGS)' -trimpath -ldflags '$(LDFLAGS)' -o $(DIST)/gaia ./cmd/gaia
 
 # Cross-compile every release target with CGO off, then prove from each
 # binary's embedded build settings that CGO was off.
@@ -38,7 +43,7 @@ build-all: cgo-guard
 		os=$${p%/*}; arch=$${p#*/}; ext=; [ "$$os" = windows ] && ext=.exe; \
 		out=$(DIST)/gaia_$${os}_$${arch}$$ext; \
 		echo "build $$out"; \
-		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $$out ./cmd/gaia; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -tags '$(TAGS)' -trimpath -ldflags '$(LDFLAGS)' -o $$out ./cmd/gaia; \
 		$(GO) version -m $$out | grep -q 'CGO_ENABLED=0' || { echo "$$out was built with CGO enabled"; exit 1; }; \
 	done
 
