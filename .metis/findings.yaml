@@ -5,6 +5,9 @@ findings:
       severity: P2
       category: correctness
       finding: deps_test.go:141 — violation returns success for internal/core importing a module package outside internal/ (for example <module>/shared), contrary to brief line 59; isolated TestReviewCoreModuleImport reproduces this despite the green verify gate — enforce the core restriction for every module-local import before the internal-only early return and add a regression case.
-      status: open
+      status: resolved
+      resolved_by: commit 23098aad270e; test TestDependencyRuleRejects
       cycle: 1
       file: deps_test.go
+      commit: 23098aad270ea83f8b53646cf5ba28020cbc394e
+      evidence: test TestDependencyRuleRejects
