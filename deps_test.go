@@ -138,6 +138,10 @@ func violation(modPath, from, to string) string {
 		return "Gaia never imports Metis Go packages (ADR-0001)"
 	}
 	tg := group(modPath, to)
+	inModule := to == modPath || strings.HasPrefix(to, modPath+"/")
+	if inModule && group(modPath, from) == "core" && tg != "core" {
+		return "internal/core imports no package of this module"
+	}
 	if !strings.HasPrefix(to, modPath+"/internal/") {
 		return ""
 	}
@@ -190,6 +194,9 @@ func TestDependencyRuleRejects(t *testing.T) {
 		{in("store/sub"), in("net"), true},
 		{in("core"), in("store"), true},
 		{in("core"), in("host"), true},
+		{in("core"), m + "/shared", true},
+		{in("core"), m, true},
+		{in("core"), m + "/cmd/gaia", true},
 		{in("node"), in("metis"), true},
 		{in("store"), in("metis"), true},
 		{m + "/cmd/gaia", in("metis"), true},
@@ -213,6 +220,8 @@ func TestDependencyRuleRejects(t *testing.T) {
 		{m + "/cmd/gaia", in("host"), false},
 		{in("store"), "fmt", false},
 		{in("core"), "errors", false},
+		{in("core"), in("core/sub"), false},
+		{in("core"), m + "x/shared", false},
 		{in("net"), "github.com/techspeque/metisx", false},
 	}
 	for _, c := range cases {
