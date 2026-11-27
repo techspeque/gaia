@@ -101,3 +101,12 @@ findings:
       status: open
       cycle: 1
       file: internal/service/render.go
+    - id: f-010
+      date: "2026-11-27"
+      slice: phase-0-ws-0.9
+      severity: P3
+      category: maint
+      finding: README.md:162 — The statement that the service survives logout and reboot is too broad for the selected macOS gui/UID LaunchAgent, which runs in the login session. Clarify macOS logout and next-login behavior while retaining the brief-decided LaunchAgent mechanism.
+      status: advisory
+      cycle: 1
+      file: README.md
