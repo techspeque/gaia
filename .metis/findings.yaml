@@ -1,1 +1,10 @@
-findings: []
+findings:
+    - id: f-001
+      date: "2026-11-27"
+      slice: phase-0-ws-0.1
+      severity: P2
+      category: correctness
+      finding: deps_test.go:141 — violation returns success for internal/core importing a module package outside internal/ (for example <module>/shared), contrary to brief line 59; isolated TestReviewCoreModuleImport reproduces this despite the green verify gate — enforce the core restriction for every module-local import before the internal-only early return and add a regression case.
+      status: open
+      cycle: 1
+      file: deps_test.go
