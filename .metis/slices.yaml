@@ -14,10 +14,6 @@ slices:
       reviewed: false
       review_cycles: 0
       created: ""
-      waiting:
-        reason: 'tsnet''s peerapi binds a kernel TCP listener on 0.0.0.0/:: (netstack mode, ipnlocal peerAPIServer.listen; drops non-peers). Only fix: build tag ts_omit_peerapiserver, which means editing the read-only Makefile (test/build/build-all/vet/staticcheck); plain ''go test ./...'' still fails the e2e listener check. Allow the Makefile edit, or accept peerapi like the WireGuard UDP socket?'
-        since: "2026-11-27T15:17:48Z"
-        human: true
     - id: phase-0-ws-0.7
       title: Node role, registration and heartbeat
       type: feat
