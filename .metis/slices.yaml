@@ -14,10 +14,6 @@ slices:
       reviewed: false
       review_cycles: 0
       created: ""
-      waiting:
-        reason: 'make vulncheck fails on go1.26.3 stdlib + klauspost/compress v1.18.5 vulns; may this slice bump go.mod to go 1.26.11 and klauspost/compress v1.20.3 (tested: no vulns, make verify green) as an out-of-scope touch, or does that belong to a separate slice?'
-        since: "2026-11-27T17:19:30Z"
-        human: true
     - id: phase-0-ws-0.9
       title: Service install
       type: feat
