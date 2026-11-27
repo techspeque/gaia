@@ -124,3 +124,10 @@ findings:
       finding: 'Gate run 1 (v0.0.1): a TLS handshake failure on the host''s tailnet listener logs ''http: TLS handshake error from %!s(<nil>): remote error: tls: unknown certificate authority'' (http.Server ErrorLog via internal/host/host.go:107); the peer address is missing, so the warning cannot be tied to a device. Seen when a tailnet client without the self-signed certificate connected.'
       status: advisory
       file: http.Server
+    - id: f-012
+      date: "2026-11-27"
+      slice: phase-0-gate
+      severity: P3
+      category: ""
+      finding: 'Gate run 1 (v0.0.1): after the node service had been stopped about 40 s and started again, the node registered at once but the next forwarded request (gaia nodes on the node, 5 s later) and the next heartbeat both timed out (''context deadline exceeded''); it re-registered and recovered within about 16 s of start. Not reproduced on an immediate restart (25 samples, 14-15 ms each). Likely the host''s stale path to the node''s new WireGuard endpoint; worth a look before Phase 1 sessions depend on the forwarder.'
+      status: advisory
