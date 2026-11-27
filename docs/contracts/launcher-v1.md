@@ -67,7 +67,7 @@ A caller that retries should retry only on 91 and 95, after a delay.
 - Push the branch before calling (`sync_before_failed` otherwise).
 - Fetch and fast-forward after `gaia run` returns, before reading the ledger.
 
-Metis does not do either today. See `metis/plans/auto-hardening.md`, item 3.
+Metis does both for an agent configured with `remote: true`, from v0.0.25.
 
 ## Example
 
