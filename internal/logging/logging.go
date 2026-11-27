@@ -4,7 +4,8 @@
 //
 // Redaction works on the encoded output, so it covers the message, every
 // attribute, groups, attributes bound before the secret was registered,
-// errors and formatted values alike. slog's JSON handler writes each record
+// errors and formatted values alike. It works token by token, so the
+// record stays valid JSON. slog's JSON handler writes each record
 // with a single Write, so a value is never split across two writes.
 package logging
 
@@ -89,6 +90,74 @@ func encodedForms(v string) [][]byte {
 	return forms
 }
 
+// redactJSON redacts one encoded JSON record token by token, so the result
+// stays valid JSON. A string token (key or value) is decoded, redacted and
+// re-encoded only if it changed. A bare token (number, true, false, null)
+// that contains a registered value becomes the string core.Redacted.
+func (r *Redactor) redactJSON(p []byte) []byte {
+	out := make([]byte, 0, len(p))
+	for i := 0; i < len(p); {
+		c := p[i]
+		switch {
+		case c == '"':
+			j := i + 1
+			for j < len(p) && p[j] != '"' {
+				if p[j] == '\\' {
+					j++
+				}
+				j++
+			}
+			if j >= len(p) { // unterminated: not JSON, redact the bytes
+				return append(out, r.redact(p[i:])...)
+			}
+			out = append(out, r.redactString(p[i:j+1])...)
+			i = j + 1
+		case isJSONDelim(c):
+			out = append(out, c)
+			i++
+		default:
+			j := i
+			for j < len(p) && !isJSONDelim(p[j]) && p[j] != '"' {
+				j++
+			}
+			tok := p[i:j]
+			if red := r.redact(tok); !bytes.Equal(red, tok) {
+				q, _ := json.Marshal(core.Redacted)
+				out = append(out, q...)
+			} else {
+				out = append(out, tok...)
+			}
+			i = j
+		}
+	}
+	return out
+}
+
+// redactString redacts one quoted JSON string token.
+func (r *Redactor) redactString(tok []byte) []byte {
+	var s string
+	if err := json.Unmarshal(tok, &s); err != nil {
+		return r.redact(tok)
+	}
+	red := r.Redact(s)
+	if red == s {
+		return tok
+	}
+	q, err := json.Marshal(red)
+	if err != nil {
+		return r.redact(tok)
+	}
+	return q
+}
+
+func isJSONDelim(c byte) bool {
+	switch c {
+	case '{', '}', '[', ']', ':', ',', ' ', '\t', '\n', '\r':
+		return true
+	}
+	return false
+}
+
 // redactWriter redacts each write before passing it on.
 type redactWriter struct {
 	w io.Writer
@@ -96,7 +165,7 @@ type redactWriter struct {
 }
 
 func (rw *redactWriter) Write(p []byte) (int, error) {
-	out := rw.r.redact(p) // ReplaceAll copies; p is never modified
+	out := rw.r.redactJSON(p) // builds a new slice; p is never modified
 	if _, err := rw.w.Write(out); err != nil {
 		return 0, err
 	}

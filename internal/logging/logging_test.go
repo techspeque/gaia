@@ -93,6 +93,33 @@ func TestEscapedSecretRedacted(t *testing.T) {
 	}
 }
 
+// TestNumericSecretKeepsJSONValid covers a secret that also appears as a
+// bare JSON token: the record must stay valid JSON and the value redacted.
+func TestNumericSecretKeepsJSONValid(t *testing.T) {
+	var buf bytes.Buffer
+	r := &Redactor{}
+	log := New(&buf, r)
+	bound := log.With("early", 123456)
+	r.Register(core.NewSecret("123456"))
+	bound.Info("m", "count", 123456, "big", 91234567, "s", "x123456y", "ok", true)
+	line := bytes.TrimSpace(buf.Bytes())
+	if !json.Valid(line) {
+		t.Fatalf("record is not valid JSON: %s", line)
+	}
+	if bytes.Contains(line, []byte("123456")) {
+		t.Fatalf("secret in log output: %s", line)
+	}
+	ls := lines(t, &buf)
+	for k, want := range map[string]any{
+		"early": core.Redacted, "count": core.Redacted, "big": core.Redacted,
+		"s": "x" + core.Redacted + "y", "ok": true,
+	} {
+		if ls[0][k] != want {
+			t.Errorf("%s = %v, want %v", k, ls[0][k], want)
+		}
+	}
+}
+
 func TestOverlappingValuesLongestFirst(t *testing.T) {
 	r := &Redactor{}
 	r.Register(core.NewSecret("abc"))
