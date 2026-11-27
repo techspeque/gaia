@@ -65,6 +65,9 @@ findings:
       severity: P3
       category: protocol
       finding: .metis/briefs/phase-0-ws-0.6.md:64 — The brief specifies permission_denied for tailnet refusal, but internal/host/host.go:143 and its tests return the existing core.CodeForbidden wire value forbidden (internal/core/error.go:18). The implementation and committed contract disagree — correct the brief to name the existing forbidden code, per the reality-beats-documents rule, so the slice contract matches its API.
-      status: open
+      status: resolved
+      resolved_by: commit d40345a8974a; .metis/briefs/phase-0-ws-0.6.md:64
       cycle: 1
       file: metis/briefs/phase-0-ws-0.6.md
+      commit: d40345a8974a0f6f7ed8f5e74e78722973f03fd1
+      evidence: .metis/briefs/phase-0-ws-0.6.md:64
