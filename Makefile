@@ -100,5 +100,31 @@ vulncheck-proof: $(GOVULNCHECK_BIN)
 	if ! echo "$$out" | grep -q 'GO-2021-0113'; then echo "$$out"; echo "govulncheck did not report GO-2021-0113"; exit 1; fi; \
 	echo "govulncheck fails on a known vulnerability (GO-2021-0113): OK"
 
-licenses:
-	GOFLAGS='-tags=$(TAGS)' $(GO) run $(GOLICENSES) check ./... --allowed_licenses=$(ALLOWED_LICENSES)
+# go-licenses is installed, not run with `go run`: GOOS/GOARCH must select
+# the packages it checks, not the platform the tool itself is built for.
+GOLICENSES_BIN := $(CURDIR)/.local/bin/go-licenses
+$(GOLICENSES_BIN):
+	GOBIN=$(CURDIR)/.local/bin $(GO) install $(GOLICENSES)
+
+# The release targets (.goreleaser.yaml). The dependency set differs by GOOS,
+# so each one is checked, not only the host's.
+LICENSE_PLATFORMS := darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64
+
+# Modules go-licenses cannot classify, ignored by exact name; every other
+# module stays checked. Keep each one's licence and source here.
+#
+# github.com/jmespath/go-jmespath v0.4.0: Apache-2.0. Its LICENSE file is the
+# short Apache-2.0 notice ("Licensed under the Apache License, Version 2.0"),
+# not the licence text, so the classifier finds no licence. Read from the
+# upstream tag v0.4.0, whose tree hashes to the go.sum h1 sum. Reached only
+# on linux, through internal/net/nettest (tailscale.com/tstest/integration ->
+# ipn/store/awsstore -> aws-sdk-go-v2/service/ssm); not in the gaia binary.
+LICENSE_IGNORE := github.com/jmespath/go-jmespath
+
+# Fails on any dependency whose licence is missing or not in ALLOWED_LICENSES.
+licenses: $(GOLICENSES_BIN)
+	@set -e; for p in $(LICENSE_PLATFORMS); do \
+		echo "licenses: $$p"; \
+		GOOS=$${p%/*} GOARCH=$${p#*/} GOFLAGS='-tags=$(TAGS)' $(GOLICENSES_BIN) check ./... \
+			--allowed_licenses=$(ALLOWED_LICENSES) $(addprefix --ignore=,$(LICENSE_IGNORE)); \
+	done
