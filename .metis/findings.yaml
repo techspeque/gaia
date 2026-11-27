@@ -77,6 +77,9 @@ findings:
       severity: P3
       category: behavior
       finding: 'cmd/gaia/node.go:111 — --join without an auth key is accepted whenever HasState is true, contrary to the unconditional rejection in brief lines 111-115. Reproduced with a nonempty tsnet state file and both key variables empty: the child reaches the tailnet trap (exit 97), instead of rejecting the missing key (exit 1). Remove the HasState exception from the --join key check and cover both fresh and existing state in TestNodeStartErrors.'
-      status: open
+      status: resolved
+      resolved_by: commit e0d4d303b18c; test TestNodeStartErrors
       cycle: 1
       file: cmd/gaia/node.go
+      commit: e0d4d303b18cb871860c96d29cb956d0097dcca7
+      evidence: test TestNodeStartErrors
