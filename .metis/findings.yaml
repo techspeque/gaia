@@ -92,3 +92,12 @@ findings:
       status: open
       cycle: 1
       file: internal/service/service.go
+    - id: f-009
+      date: "2026-11-27"
+      slice: phase-0-ws-0.9
+      severity: P2
+      category: behavior
+      finding: internal/service/render.go:31 — Environment= reuses ExecStart dollar escaping, rendering XDG_RUNTIME_DIR=/run/a$b as /run/a$$b. systemd.exec specifies that Environment= performs no variable expansion, so the daemon uses a different socket directory from the CLI. Use directive-specific quoting that preserves literal dollars in environment values and add a regression test covering dollar-containing socket paths.
+      status: open
+      cycle: 1
+      file: internal/service/render.go
