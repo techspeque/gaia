@@ -121,4 +121,23 @@ None.
 
 ## Report
 
-Filled at implementation.
+- **Built:** `internal/service` (`service.go`: `Platform`, `Spec`,
+  `Install`, `Uninstall`, `UnitPath`, `Render`, `Marker`, `ErrNotOurs`;
+  `render.go`: systemd unit and launchd plist); `cmd/gaia/service.go`
+  (`gaia service install|uninstall`, argument parsing, tailnet-state
+  precondition, socket-dir env, messages); `main.go` dispatch and usage;
+  README "Running as a service"; CI job `service` (ubuntu-latest,
+  macos-latest) running `TestServiceE2E` with `GAIA_SERVICE_E2E=1`.
+- **Run locally (darwin/arm64):** `make verify` green;
+  `go test ./internal/service` and `-run Service ./cmd/gaia` pass;
+  `GOOS=windows go build ./cmd/gaia` and `GOOS=linux go vet` OK.
+- **Not run locally:** `TestServiceE2E` (installs a real launchd agent;
+  the command was not permitted in this session). It runs first in CI job
+  `service`. On Linux the job runs `sudo loginctl enable-linger "$USER"` in
+  a workflow step to give the runner a systemd user manager; that is runner
+  setup, not Gaia's code path, which runs only `systemctl --user`,
+  `loginctl show-user` and `launchctl` (checked by `TestOnlyUserCommands`).
+- **Decisions:** flags are written as `--flag=value`; heartbeat flags only
+  when given; the plist's `KeepAlive` restarts on unsuccessful exit only,
+  so a clean SIGTERM stop stays stopped; `bootstrap` after `bootout` is
+  retried up to 10× at 300 ms because launchd tears down asynchronously.

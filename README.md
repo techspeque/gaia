@@ -157,6 +157,38 @@ gaia node --host my-host
   machine. A node still running registers again at its next heartbeat, so
   stop `gaia node` on it first.
 
+## Running as a service
+
+`gaia service install` runs the daemon as a service of the current user, so
+it survives logout and reboot: a systemd user unit on Linux
+(`~/.config/systemd/user/gaia.service`), a launchd agent on macOS
+(`~/Library/LaunchAgents/io.github.techspeque.gaia.plist`, logging to
+`~/Library/Logs/gaia/gaia.log`). It needs no root and never runs `sudo`.
+
+```sh
+gaia service install host --node                     # local-only
+gaia service install host --tailnet --allow tag:gaia # a tailnet host
+gaia service install node --host my-host             # another machine
+gaia service uninstall
+```
+
+- The role takes the flags of `gaia host` or `gaia node`. `--join` and
+  `--auth-key-file` are refused: a unit never holds an auth key. For a
+  tailnet host or a node, join once by hand first (see above), stop it, then
+  install; install refuses a state directory with no tailnet state.
+- The unit runs this binary with an absolute `--state` (default as for the
+  daemon), and carries only `XDG_RUNTIME_DIR` and `TMPDIR` from your shell,
+  so `gaia` commands in it find the daemon's socket.
+- Installing twice changes nothing and says so; installing with other flags
+  rewrites the unit and restarts the service. Gaia marks every unit it
+  writes and refuses to overwrite or remove one it did not write.
+- `gaia service uninstall` stops the service and removes the unit. The state
+  directory stays.
+- On Linux, a user service stops at logout and does not start at boot
+  unless lingering is on. When it is off, install prints the one command to
+  run, `loginctl enable-linger USER`; Gaia never runs it.
+- Windows is not supported yet.
+
 ## Contributing and security
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities privately as

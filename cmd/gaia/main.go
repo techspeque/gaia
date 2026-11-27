@@ -38,6 +38,11 @@ const usage = `usage: gaia <command> [flags]
                                 tailnet with the auth key, as for the host
   nodes [-o text|json]          list the machines registered with the host
   nodes remove NAME             remove a retired machine from the registry
+  service install (host [--node] [--tailnet ...] | node --host NAME)
+                                run the daemon as a user service (systemd
+                                user unit or launchd agent) and start it
+  service uninstall             stop and remove that service; the state
+                                directory stays
   --version                    print version, commit and platform
 `
 
@@ -61,6 +66,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runNode(args[1:], stderr, runtime.GOOS)
 	case "nodes":
 		return cli.Nodes(args[1:], cliEnv(stdout, stderr))
+	case "service":
+		return runService(args[1:], stdout, stderr, runtime.GOOS)
 	case "-h", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return 0
