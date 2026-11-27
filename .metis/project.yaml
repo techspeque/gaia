@@ -2,7 +2,7 @@
 version: 1
 project:
   name: gaia
-  integration_branch: dev
+  integration_branch: feature/phase-0-foundation
   release_branch: main
   overview: OVERVIEW.md
 agents:
