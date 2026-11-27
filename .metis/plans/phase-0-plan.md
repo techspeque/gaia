@@ -10,7 +10,7 @@ created: 2026-11-27
 # Phase 0 — Foundation
 
 > Derived from: OVERVIEW.md §4 Phase 0
-> Produces: slices phase-0-ws-0.1 … 0.8 and phase-0-gate in .metis/slices.yaml
+> Produces: slices phase-0-ws-0.1 … 0.9 and phase-0-gate in .metis/slices.yaml
 > ADRs: 0001, 0002, 0004, 0006, 0012 (all in .metis/adr/)
 
 ## Context
@@ -24,9 +24,10 @@ and a user-only local socket.
 
 Decisions made in this plan:
 
-- **Local-only mode is one process.** `gaia host` also runs the node role
-  for its own machine, in-process, unless started with `--no-node`. `gaia
-  node` is only for the other machines.
+- **Local-only mode is one process, asked for with a switch.** `gaia host
+  --node` also runs the node role for its own machine, in-process. Plain
+  `gaia host` runs the host alone and starts no session. `gaia node` is
+  only for the other machines.
 - **A shared types package.** `internal/core` holds ids, states, exit codes,
   the error shape and the redaction type. Leaves depend on `core` and not on
   each other (OVERVIEW §2.3 is updated with this plan).
@@ -34,9 +35,10 @@ Decisions made in this plan:
   CI (ADR-0002 rule 5). The daemon roles refuse to start on Windows with a
   clear message until the named-pipe and ConPTY work is planned, after
   Phase 2.
-- **Service registration is by hand for now.** `gaia service install` stays
-  in Phase 5. The gate uses a hand-written user unit described in
-  `.local/hosts.md`.
+- **Service registration is in this phase, for Linux and macOS.** `gaia
+  service install` writes a systemd user unit or a launchd agent
+  (workstream 0.9), because every later gate needs a daemon that survives a
+  reboot. The Windows service comes with the Windows daemon.
 
 ## Dependencies
 
@@ -147,10 +149,10 @@ Acceptance criteria:
 - **Blocked by:** 0.3
 
 Tasks:
-- Implement `gaia host [--state DIR] [--no-node]`: open the store, bind the local socket, serve the API, shut down cleanly on SIGTERM and SIGINT
+- Implement `gaia host [--state DIR] [--node]`: open the store, bind the local socket, serve the API, shut down cleanly on SIGTERM and SIGINT
 - Bind a unix socket at mode 0600 in a user-only runtime directory; refuse to start if it cannot be bound as specified, and remove a stale socket only after proving no daemon answers on it (ADR-0004 rule 3)
 - Serve `/healthz` with no machine details, `/api/v1/version` and `/api/v1/nodes`
-- In local-only mode, register the host's own machine as a node in-process and keep its `last_seen` current
+- With `--node`, register the host's own machine as a node in-process and keep its `last_seen` current; without it, the registry starts empty
 - Emit structured JSON logs to stderr through a logger that redacts registered secret values
 - Refuse the daemon roles on Windows with a clear message
 
@@ -161,7 +163,7 @@ Suggested packages:
 
 Acceptance criteria:
 - [ ] The socket is mode 0600 and a second user on the machine cannot connect to it
-- [ ] A fresh `gaia host` opens no TCP listener at all, checked by listing the process's sockets in a test
+- [ ] A fresh `gaia host`, with or without `--node`, opens no TCP listener at all, checked by listing the process's sockets in a test
 - [ ] `/healthz` returns no hostname, version or path
 - [ ] `/api/v1/nodes` lists the local machine as `online` within one heartbeat interval
 - [ ] A registered secret value written to the logger does not appear in its output
@@ -189,7 +191,7 @@ Suggested packages:
 - `internal/core`
 
 Acceptance criteria:
-- [ ] `gaia nodes -o json` against a fresh local-only host matches the recorded fixture apart from ids and timestamps
+- [ ] `gaia nodes -o json` against a fresh `gaia host --node` matches the recorded fixture apart from ids and timestamps
 - [ ] With no daemon running, `gaia nodes` prints the message and exits with the documented code, in under 200 ms
 - [ ] A CLI one API version behind the daemon fails with the upgrade instruction
 - [ ] No code path reachable from a CLI command imports `tsnet`, checked by a test on the import graph
@@ -285,6 +287,36 @@ Acceptance criteria:
 
 ---
 
+## Workstream 0.9: Service install
+
+- **Risk:** medium
+- **Coder:** claude-code/opus-5-5
+- **Reviewer:** codex/gpt-6-astra
+- **Stage:** foundation
+- **Blocked by:** 0.7
+
+Tasks:
+- Implement `gaia service install (host [--node] [--tailnet] | node --host NAME)` and `gaia service uninstall`, for the current user and with no root
+- On Linux, write a systemd user unit under `~/.config/systemd/user`, enable and start it; when lingering is off, print the one `loginctl enable-linger` command the user must run and do not run it
+- On macOS, write a launchd agent under `~/Library/LaunchAgents` and load it
+- Mark every file Gaia writes; refuse to overwrite or remove a unit it did not write
+- Make both commands safe to run twice: a second install changes nothing and says so
+- Put no secret and no tailnet auth key in a unit file; `--join` is never accepted here
+- Refuse on Windows with a clear message
+
+Suggested packages:
+- `internal/service`
+- `cmd/gaia`
+
+Acceptance criteria:
+- [ ] On Linux and macOS CI runners, install starts the daemon and `gaia nodes` answers; uninstall stops it and leaves the state directory untouched
+- [ ] A second install prints that nothing changed and rewrites no file
+- [ ] A unit file not written by Gaia is neither overwritten nor removed
+- [ ] The unit runs as the user, with no root and no `sudo` anywhere in the code path
+- [ ] The generated unit contains no credential, checked by a test
+
+---
+
 ## Phase Gate
 
 > This section defines how Phase 0 is validated as a composed system.
@@ -292,14 +324,14 @@ Acceptance criteria:
 > blocked by every workstream in the phase).
 
 Composition scenarios to validate:
-- [ ] On one machine, install a release build with `install.sh` and run `gaia host`; `gaia nodes -o json` lists that machine `online`, and the process has no TCP listener
+- [ ] On one machine, install a release build with `install.sh` and run `gaia host --node`; `gaia nodes -o json` lists that machine `online`, and the process has no TCP listener
 - [ ] On two real machines on a tailnet, `gaia host --tailnet` on one and `gaia node --host … --join` on the other; `gaia nodes` on both lists both
 - [ ] Suspending or stopping the node machine shows it `offline`; bringing it back shows it `online` without a second join
 - [ ] Restarting the host keeps both nodes registered with the same ids
 - [ ] Listing listening sockets on both machines shows Gaia only on the tailnet interface, 127.0.0.1 and its local socket
 - [ ] A tailnet device that is not on the allowlist is refused by the host API
 - [ ] Every `-o json` output matches its recorded fixture
-- [ ] Both daemons run under a user unit, with no root, and are up after a reboot
+- [ ] Both daemons run under the unit written by `gaia service install`, with no root, and are up after a reboot; `gaia service uninstall` leaves the state directory in place
 
 Performance / resource checks:
 - [ ] `gaia nodes` completes in under 100 ms on the host and under 500 ms on a node

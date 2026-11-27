@@ -79,8 +79,8 @@ Phase 0–2 scope.
   (PTY, env-injected credentials, node's own git checkout)
 ```
 
-One binary, two roles: `gaia host` and `gaia node`. One machine may run both,
-and then needs no tailnet (local-only mode). The `gaia` CLI, and Metis through
+One binary, two roles: `gaia host` and `gaia node`. One machine may run both
+(`gaia host --node`), and then needs no tailnet (local-only mode). The `gaia` CLI, and Metis through
 it, talk only to the daemon on the same machine over a user-only local socket;
 only daemons join the tailnet (ADR-0004).
 
@@ -192,7 +192,7 @@ only by `node`.
 Repo, CI, signed release pipeline, open-source scaffolding (LICENSE,
 CONTRIBUTING, SECURITY), `gaia host` / `gaia node` skeleton, CLI-to-daemon
 local socket, local-only mode, tsnet join, SQLite schema and migrations, node
-registration and heartbeat.
+registration and heartbeat, `gaia service install` for Linux and macOS.
 
 ### Phase 1 — Sessions
 Per-session supervisor, PTY, scrollback, start / list / attach / detach / stop
@@ -220,7 +220,7 @@ Ship adapter: deployments per node in the UI, where Ship is installed
 (ADR-0013).
 
 ### Phase 5 — Release
-Installers, service registration, user and operator docs, a threat model
+Installers, Windows service registration, user and operator docs, a threat model
 document, an upgrade path, v1.0.
 
 ---
@@ -252,8 +252,9 @@ Consequences stated plainly:
 ### CLI (human)
 
 ```
-gaia host [--state DIR]
+gaia host [--state DIR] [--node]
 gaia node --host NAME
+gaia service install|uninstall
 gaia nodes
 gaia creds add|list|rotate|remove
 gaia profiles add|list|remove
@@ -319,7 +320,7 @@ Shapes are provisional until Ship v1.0.
 ## 8. Operational Concerns
 
 - **Install:** `install.sh` / `install.ps1` as Metis does, verifying checksums and signatures; `gaia service install` registers the user service.
-- **First run:** `gaia host` alone is local-only; `gaia host --tailnet` joins a tailnet; `gaia node --join <key>` adds a machine. Public link stays off until `gaia host --public` and at least one passkey or OIDC user exists.
+- **First run:** `gaia host --node` alone is local-only; `gaia host --tailnet` joins a tailnet; `gaia node --join <key>` adds a machine. Public link stays off until `gaia host --public` and at least one passkey or OIDC user exists.
 - **State:** host state dir holds SQLite, tsnet state and the built-in store; back it up as one directory.
 - **Logging:** structured JSON to stderr with secret redaction at the logger.
 - **Upgrades:** host and node versions negotiated on registration; host serves N and N-1 nodes.
