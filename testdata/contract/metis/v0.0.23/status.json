@@ -1,0 +1,9 @@
+{
+  "state": "active",
+  "id": "phase-0-gate",
+  "role": "Coder",
+  "agent_slug": "claude-code/opus-5-5",
+  "done": 0,
+  "total": 1,
+  "percent": 0
+}

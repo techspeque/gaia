@@ -1,0 +1,47 @@
+{
+  "total": 16,
+  "done": 15,
+  "coding": 0,
+  "reviewing": 0,
+  "pending": 1,
+  "rework": 0,
+  "by_stage": {
+    "(none)": {
+      "total": 1,
+      "done": 0
+    },
+    "foundation": {
+      "total": 15,
+      "done": 15
+    }
+  },
+  "stage_order": [
+    "foundation",
+    "(none)"
+  ],
+  "by_phase": {
+    "phase-0-plan": {
+      "auto_mode": "step",
+      "auto_mode_source": "project",
+      "total": 16,
+      "done": 15,
+      "stages": {
+        "(none)": {
+          "total": 1,
+          "done": 0
+        },
+        "foundation": {
+          "total": 15,
+          "done": 15
+        }
+      },
+      "stage_order": [
+        "foundation",
+        "(none)"
+      ]
+    }
+  },
+  "phase_order": [
+    "phase-0-plan"
+  ]
+}

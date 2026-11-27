@@ -2,7 +2,7 @@
 type: overview
 project: gaia
 status: living
-last_updated: 2026-11-24
+last_updated: 2026-11-27
 ---
 
 # Gaia — Full Specification
@@ -122,6 +122,7 @@ Node, on disk: git checkouts, session scrollback logs and supervisor state. No c
 
 ```
 cmd/gaia            entry point, role dispatch
+internal/core       ids, states, reserved exit codes, error shape, redaction; no I/O
 internal/host       registry, API, UI serving
 internal/node       node agent, supervisor client, forwarder
 internal/repo       node checkouts: fetch, fast-forward, push
@@ -135,8 +136,8 @@ internal/ship       ship CLI adapter (exec + JSON decode, nothing else)
 web/                UI, built to static files, embedded with go:embed
 ```
 
-Dependency rule: `host` and `node` depend on the leaves; leaves never import
-each other except `proxy → creds`. `metis` is imported only by `host`; `ship`
+Dependency rule: `host` and `node` depend on the leaves; leaves depend on
+`core` and never import each other except `proxy → creds`. `metis` is imported only by `host`; `ship`
 only by `node`.
 
 ---
@@ -282,8 +283,9 @@ from the auth header.
 ### Launcher contract (provided to Metis, ADR-0009)
 
 `gaia run … --wait -- <agent argv>` streams output, exits with the agent's
-exit code, uses a reserved, documented range for Gaia's own failures, and
-stops the remote session on interrupt. Set as `agents.<slug>.launch` in
+exit code, uses a reserved, documented range for Gaia's own failures (90 to
+99), and stops the remote session on interrupt. The full contract is
+`docs/contracts/launcher-v1.md`. Set as `agents.<slug>.launch` in
 `metis.yaml`. Breaking changes need a major version.
 
 ### Metis contract (consumed)
