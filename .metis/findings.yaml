@@ -53,6 +53,9 @@ findings:
       severity: P3
       category: correctness
       finding: 'cmd/gaia/cli/nodes.go:52 — flag.Parse writes unprefixed diagnostics: gaia nodes --bogus prints "flag provided but not defined: -bogus" and gaia nodes -o prints "flag needs an argument: -o", violating the brief requirement that CLI errors start with "gaia: ". Capture or suppress the default parser diagnostic and emit one prefixed error followed by usage, preserving exit 98 and help behavior; extend TestNodesUsage to assert the prefix.'
-      status: open
+      status: resolved
+      resolved_by: commit 237642a422d4; test TestNodesUsage
       cycle: 1
       file: cmd/gaia/cli/nodes.go
+      commit: 237642a422d4d94cf0f66d1a97a761c34551556d
+      evidence: test TestNodesUsage
