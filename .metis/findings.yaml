@@ -59,3 +59,12 @@ findings:
       file: cmd/gaia/cli/nodes.go
       commit: 237642a422d4d94cf0f66d1a97a761c34551556d
       evidence: test TestNodesUsage
+    - id: f-006
+      date: "2026-11-27"
+      slice: phase-0-ws-0.6
+      severity: P3
+      category: protocol
+      finding: .metis/briefs/phase-0-ws-0.6.md:64 — The brief specifies permission_denied for tailnet refusal, but internal/host/host.go:143 and its tests return the existing core.CodeForbidden wire value forbidden (internal/core/error.go:18). The implementation and committed contract disagree — correct the brief to name the existing forbidden code, per the reality-beats-documents rule, so the slice contract matches its API.
+      status: open
+      cycle: 1
+      file: metis/briefs/phase-0-ws-0.6.md
