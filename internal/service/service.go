@@ -147,7 +147,28 @@ func Install(ctx context.Context, p Platform, s Spec) (Result, error) {
 		res.LogHint = logPath(p)
 		err = installLaunchd(ctx, p, path, &res)
 	}
+	if err != nil && res.Written {
+		// The new unit was not applied. Put back what was there, so a retry
+		// sees a differing unit and applies it rather than finding the bytes
+		// equal and doing nothing.
+		if rerr := restore(path, have, exists); rerr != nil {
+			return res, errors.Join(err, fmt.Errorf("restoring the previous unit: %w", rerr))
+		}
+		res.Written = false
+	}
 	return res, err
+}
+
+// restore puts back the unit Install found at path: prev when it existed,
+// else no file.
+func restore(path string, prev []byte, existed bool) error {
+	if existed {
+		return writeAtomic(path, prev)
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 // Uninstall stops the service and removes its unit. It leaves every other

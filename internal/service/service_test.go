@@ -287,6 +287,77 @@ func TestInstallChangedRestarts(t *testing.T) {
 	}
 }
 
+// An update whose apply step fails leaves the previous unit on disk, so a
+// retry applies the new one instead of reporting nothing changed.
+func TestInstallFailedUpdateRetried(t *testing.T) {
+	for goos, c := range map[string]struct {
+		fail  string
+		retry []string
+	}{
+		"linux": {"systemctl --user daemon-reload",
+			[]string{"systemctl --user daemon-reload", "systemctl --user restart gaia.service"}},
+		"darwin": {"launchctl bootout gui/501/" + LaunchdLabel,
+			[]string{"launchctl bootout gui/501/" + LaunchdLabel, "launchctl enable gui/501/" + LaunchdLabel,
+				"launchctl bootstrap gui/501 PATH"}},
+	} {
+		t.Run(goos, func(t *testing.T) {
+			f := newFake()
+			p := platform(t, goos, f)
+			first, err := Install(context.Background(), p, spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			old, _ := os.ReadFile(first.Path)
+			s := spec
+			s.Args = []string{"/opt/gaia", "node", "--host", "h"}
+			f.fail[c.fail] = true
+			res, err := Install(context.Background(), p, s)
+			if err == nil {
+				t.Fatal("install succeeded with a failing apply step")
+			}
+			if res.Written {
+				t.Errorf("result = %+v, want not written after restore", res)
+			}
+			if b, _ := os.ReadFile(first.Path); string(b) != string(old) {
+				t.Errorf("previous unit not restored:\n%s", b)
+			}
+			delete(f.fail, c.fail)
+			f.cmds = nil
+			res, err = Install(context.Background(), p, s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !res.Written || !res.Changed {
+				t.Errorf("retry result = %+v, want written and changed", res)
+			}
+			for i := range c.retry {
+				c.retry[i] = strings.ReplaceAll(c.retry[i], "PATH", res.Path)
+			}
+			if !slices.Equal(f.mutating(), c.retry) {
+				t.Errorf("retry commands = %q, want %q", f.mutating(), c.retry)
+			}
+			if b, _ := os.ReadFile(res.Path); !strings.Contains(string(b), "node") {
+				t.Errorf("retry did not write the new unit:\n%s", b)
+			}
+		})
+	}
+}
+
+// A fresh install whose apply step fails leaves no unit behind.
+func TestInstallFailedFreshRemoved(t *testing.T) {
+	f := newFake()
+	f.fail["launchctl print gui/501/"+LaunchdLabel] = true
+	p := platform(t, "darwin", f)
+	path, _ := UnitPath(p)
+	f.fail["launchctl bootstrap gui/501 "+path] = true
+	if _, err := Install(context.Background(), p, spec); err == nil {
+		t.Fatal("install succeeded with a failing bootstrap")
+	}
+	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("unit left after a failed fresh install: %v", err)
+	}
+}
+
 func TestInstallLaunchdFresh(t *testing.T) {
 	f := newFake()
 	f.fail["launchctl print gui/501/"+LaunchdLabel] = true
