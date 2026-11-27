@@ -12,6 +12,24 @@ const APIPrefix = "/api/v1"
 // NodesPath is the collection of registered nodes.
 const NodesPath = APIPrefix + "/nodes"
 
+// VersionPath reports the daemon's API and Gaia versions.
+const VersionPath = APIPrefix + "/version"
+
+// HealthzPath answers whether the daemon is up. It is outside /api/v1 and
+// reveals nothing about the machine.
+const HealthzPath = "/healthz"
+
+// HealthResponse is the body of GET /healthz. Status is always "ok".
+type HealthResponse struct {
+	Status string `json:"status"`
+}
+
+// VersionResponse is the body of GET /api/v1/version.
+type VersionResponse struct {
+	APIVersion  int    `json:"api_version"`
+	GaiaVersion string `json:"gaia_version"`
+}
+
 // Node is a registered machine as the API returns it (OVERVIEW §2.2).
 type Node struct {
 	ID              NodeID    `json:"id"`

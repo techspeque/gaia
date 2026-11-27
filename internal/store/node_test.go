@@ -190,3 +190,47 @@ func TestConcurrentWriters(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateNode(t *testing.T) {
+	ctx := context.Background()
+	s := mustOpen(t, stateDir(t))
+	a, b := testNode(1, "alpha"), testNode(2, "bravo")
+	for _, n := range []Node{a, b} {
+		if err := s.CreateNode(ctx, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	u := a
+	u.Name, u.OS, u.Arch, u.GaiaVersion, u.APIVersion = "alpha2", "darwin", "amd64", "v0.0.2", core.APIVersion+1
+	u.LastSeen = a.LastSeen.Add(time.Hour)
+	u.CreatedAt = time.Time{} // ignored: created_at is kept
+	if err := s.UpdateNode(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetNode(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.CreatedAt = a.CreatedAt
+	sameNode(t, got, u)
+
+	dup := u
+	dup.Name = b.Name
+	wantCode(t, s.UpdateNode(ctx, dup), core.CodeConflict)
+	dup = u
+	dup.TailnetIdentity = b.TailnetIdentity
+	wantCode(t, s.UpdateNode(ctx, dup), core.CodeConflict)
+
+	wantCode(t, s.UpdateNode(ctx, testNode(9, "zulu")), core.CodeNotFound)
+
+	bad := u
+	bad.Name = ""
+	wantCode(t, s.UpdateNode(ctx, bad), core.CodeInvalidArgument)
+	bad = u
+	bad.LastSeen = time.Time{}
+	wantCode(t, s.UpdateNode(ctx, bad), core.CodeInvalidArgument)
+
+	got, _ = s.GetNode(ctx, a.ID)
+	sameNode(t, got, u)
+}

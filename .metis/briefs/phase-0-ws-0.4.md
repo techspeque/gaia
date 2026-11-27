@@ -180,4 +180,31 @@ None.
 
 ## Report
 
-Filled at implementation.
+- Files: `cmd/gaia/{main,daemon,daemon_test}.go`;
+  `internal/host/{host,host_test}.go`, `internal/node/{node,node_test}.go`
+  (placeholder `doc.go` removed from both); `internal/sock/{sock,sock_unix,
+  sock_other,peercred_linux,peercred_darwin,sock_test}.go`;
+  `internal/logging/{logging,logging_test}.go`; `internal/core/api.go`;
+  `internal/store/{node,node_test}.go`; `go.mod` (`golang.org/x/sys` made
+  direct; `go.sum` unchanged).
+- `make verify` green; `go test -race` green on host, node, sock, logging,
+  cmd/gaia; `go vet ./...` clean for linux/amd64, darwin/amd64,
+  windows/arm64; `make build-all` builds all six targets with CGO off.
+- The daemon tests run the test binary as `gaia host` in a child process.
+  On darwin the inet-socket check uses `lsof` (ran, not skipped); the
+  linux `/proc` path compiles and is exercised in CI on ubuntu.
+  `TestSocketListerSeesTCP` proves the checker finds a TCP listener.
+- "A second user cannot connect": the socket is 0600 in a 0700
+  directory owned by the user, and the peer-credential check closes any
+  peer with another uid. CI has no second user, so the check is tested with
+  an injected expected uid; a foreign-owned directory refusal is not
+  tested (needs root to chown).
+- Redaction is done on the encoded JSON line, which also covers attributes
+  bound before a secret was registered; the raw and JSON-escaped forms of
+  each value are matched.
+- Deviation from the design text: `store.UpdateNode` also updates
+  `tailnet_identity` (it is the full mutable row); `created_at` is kept.
+- `--node` registers by listing nodes and matching the identity (`local`);
+  no lookup-by-identity was added to the store.
+- Not done here: a lock on the state directory itself. Two daemons on
+  the same state dir but different runtime dirs are not prevented.

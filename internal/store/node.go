@@ -86,6 +86,31 @@ func (s *Store) UpdateNodeLastSeen(ctx context.Context, id core.NodeID, t time.T
 	return affectedOne(res, err, id)
 }
 
+// UpdateNode stores n's name, tailnet identity, os, arch, gaia version, API
+// version and last_seen on the row with n's id; created_at is kept. A
+// missing row is core.CodeNotFound; a name or identity another node holds
+// is core.CodeConflict.
+func (s *Store) UpdateNode(ctx context.Context, n Node) error {
+	if n.CreatedAt.IsZero() {
+		n.CreatedAt = n.LastSeen // not stored; satisfies validateNode
+	}
+	if err := validateNode(n); err != nil {
+		return err
+	}
+	res, err := s.w.ExecContext(ctx,
+		`UPDATE nodes SET name = ?, tailnet_identity = ?, os = ?, arch = ?, gaia_version = ?,
+		 api_version = ?, last_seen = ? WHERE id = ?`,
+		n.Name, n.TailnetIdentity, n.OS, n.Arch, n.GaiaVersion, n.APIVersion, n.LastSeen.UnixNano(), n.ID.String())
+	if isUniqueViolation(err) {
+		return &core.Error{
+			Code:    core.CodeConflict,
+			Message: fmt.Sprintf("another node already has name %q or this tailnet identity", n.Name),
+			Details: map[string]string{"id": n.ID.String(), "name": n.Name},
+		}
+	}
+	return affectedOne(res, err, n.ID)
+}
+
 // RemoveNode deletes the node with id, or returns a core.CodeNotFound error.
 func (s *Store) RemoveNode(ctx context.Context, id core.NodeID) error {
 	res, err := s.w.ExecContext(ctx, `DELETE FROM nodes WHERE id = ?`, id.String())

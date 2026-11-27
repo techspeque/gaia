@@ -19,7 +19,9 @@ var (
 
 const usage = `usage: gaia <command> [flags]
 
-  --version   print version, commit and platform
+  host [--state DIR] [--node]   run the host daemon; --node also runs this
+                                machine as a node (local-only mode)
+  --version                     print version, commit and platform
 `
 
 func main() {
@@ -36,6 +38,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "--version", "-version":
 		fmt.Fprintln(stdout, versionString(version, resolveCommit(commit, readBuildInfo)))
 		return 0
+	case "host":
+		return runHost(args[1:], stderr, runtime.GOOS)
+	case "node":
+		return runNode(args[1:], stderr, runtime.GOOS)
 	case "-h", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return 0
