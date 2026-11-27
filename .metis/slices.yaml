@@ -9,7 +9,7 @@ slices:
       reviewer: codex/gpt-6-astra
       plan: .metis/plans/phase-0-plan.md
       plan_section: 'Workstream 0.8: Release pipeline and install script'
-      coded: false
+      coded: true
       reviewed: false
       review_cycles: 0
       notes: 'First run of .github/workflows/release.yml on main (manual dispatch, the dry run) failed before any step: "Unable to resolve action sigstore/cosign-installer@v4, unable to find version v4". The action publishes no floating v4 tag; its tags are v2, v3 and full versions, the newest v4.1.4 (checked against the GitHub API on 2026-11-27). Every other uses: reference in release.yml and ci.yml was checked the same way and resolves (actions/checkout@v5, actions/setup-go@v6, actions/upload-artifact@v5, actions/download-artifact@v6, goreleaser/goreleaser-action@v6, anchore/sbom-action/download-syft@v0). Pin sigstore/cosign-installer to v4.1.4 and change nothing else in the workflow. The session cannot run GitHub workflows; say so in the report. The Human runs the dry run after this lands. If a cheap local check that action references use tags that exist is practical without network access in make verify, do not add one; note it as a follow-up instead.'
