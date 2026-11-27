@@ -47,3 +47,12 @@ findings:
       file: internal/logging/logging.go
       commit: 9c4e816ca344c12eb71a3495689d1083c524eb67
       evidence: test TestNumericSecretKeepsJSONValid
+    - id: f-005
+      date: "2026-11-27"
+      slice: phase-0-ws-0.5
+      severity: P3
+      category: correctness
+      finding: 'cmd/gaia/cli/nodes.go:52 — flag.Parse writes unprefixed diagnostics: gaia nodes --bogus prints "flag provided but not defined: -bogus" and gaia nodes -o prints "flag needs an argument: -o", violating the brief requirement that CLI errors start with "gaia: ". Capture or suppress the default parser diagnostic and emit one prefixed error followed by usage, preserving exit 98 and help behavior; extend TestNodesUsage to assert the prefix.'
+      status: open
+      cycle: 1
+      file: cmd/gaia/cli/nodes.go
