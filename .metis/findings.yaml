@@ -29,9 +29,12 @@ findings:
       severity: P2
       category: behavior
       finding: cmd/gaia/daemon.go:111 — If Serve completes before the select (including normal SIGTERM cancellation), this branch consumes its only result, then line 122 waits forever for a second result; reproduced with TestReviewShutdownCompletion by allowing Serve to finish before the select, which logs API server stopped with err:null and hangs. Consume the server completion exactly once, preserve exit 0 for normal signal shutdown, and add a regression covering this ordering.
-      status: open
+      status: resolved
+      resolved_by: commit 0bddfa5b76a7; test TestShutdownServerResultConsumedOnce
       cycle: 1
       file: cmd/gaia/daemon.go
+      commit: 0bddfa5b76a76c1b0e0dd189931b5c72030e6a06
+      evidence: test TestShutdownServerResultConsumedOnce
     - id: f-004
       date: "2026-11-27"
       slice: phase-0-ws-0.4
