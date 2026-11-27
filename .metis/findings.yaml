@@ -23,3 +23,12 @@ findings:
       file: internal/store/store.go
       commit: dc1cdd7922683bcde1218e34f5fb80ce45d08c3e
       evidence: test TestNewerSchemaInWALRefusedAndUntouched
+    - id: f-003
+      date: "2026-11-27"
+      slice: phase-0-ws-0.4
+      severity: P2
+      category: behavior
+      finding: cmd/gaia/daemon.go:111 — If Serve completes before the select (including normal SIGTERM cancellation), this branch consumes its only result, then line 122 waits forever for a second result; reproduced with TestReviewShutdownCompletion by allowing Serve to finish before the select, which logs API server stopped with err:null and hangs. Consume the server completion exactly once, preserve exit 0 for normal signal shutdown, and add a regression covering this ordering.
+      status: open
+      cycle: 1
+      file: cmd/gaia/daemon.go
