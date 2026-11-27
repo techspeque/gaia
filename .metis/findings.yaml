@@ -17,6 +17,9 @@ findings:
       severity: P2
       category: correctness
       finding: internal/store/store.go:69-76 — A newer user_version present only in an uncheckpointed WAL bypasses the header check; Open then returns version_mismatch but its writer connection and Close checkpoint gaia.db and remove gaia.db-wal/gaia.db-shm. Reproduced with a version-1 header and committed version-2 WAL, violating brief lines 75-77. Detect the effective newer schema without modifying any original state files and add an Open-level WAL-recovery test asserting byte-identical directory contents on refusal.
-      status: open
+      status: resolved
+      resolved_by: commit dc1cdd792268; test TestNewerSchemaInWALRefusedAndUntouched; dc1cdd7
       cycle: 1
       file: internal/store/store.go
+      commit: dc1cdd7922683bcde1218e34f5fb80ce45d08c3e
+      evidence: test TestNewerSchemaInWALRefusedAndUntouched
