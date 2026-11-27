@@ -166,11 +166,13 @@ newer Go version now permits a newer tsnet, as a follow-up.
 - **Not run locally:** the strace path of `TestReleaseNoNetworkLocalOnly`,
   the static/busybox checks and arm64 (linux-only; Docker not permitted in
   this session). They run first in the release workflow.
-- **Open, needs a person:** `make vulncheck` FAILS on the current module:
-  ~15 reachable stdlib vulnerabilities in go1.26.3 (e.g. GO-2026-6859,
-  GO-2026-6613, fixed by go1.26.11) and GO-2026-6865 in
-  `github.com/klauspost/compress` v1.18.5 (indirect via tailscale, fixed
-  v1.20.2). Tried in a throwaway worktree: `go get go@1.26.11
-  github.com/klauspost/compress@v1.20.3` gives "No vulnerabilities found" and
-  `make verify` green. `go.mod`/`go.sum` are read-only for this slice and the
-  toolchain pin was kept deliberately in 0.6, so the bump is not made here.
+- **Dependency bump (Human decision, 2026-11-27):** `make vulncheck` failed
+  on go1.26.3 (~15 reachable stdlib vulnerabilities, e.g. GO-2026-6859,
+  GO-2026-6613) and on GO-2026-6865 in `github.com/klauspost/compress`
+  v1.18.5 (indirect via tailscale). Bumped `go.mod` to `go 1.26.11` and
+  `klauspost/compress` to v1.20.3; nothing else changed in `go.mod`/`go.sum`.
+  After the bump: `make vulncheck` "No vulnerabilities found" (3 in required
+  modules, not called); `make licenses` OK. CI and release workflows read the
+  version from `go.mod` (`go-version-file`), so no other pin moved.
+- **Follow-up:** Go 1.26.11 now permits a newer `tailscale.com`/tsnet; not
+  bumped here (out of scope), worth a separate slice.
