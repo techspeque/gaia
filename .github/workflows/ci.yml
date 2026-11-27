@@ -1,0 +1,76 @@
+name: ci
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: make verify
+
+  # Installs a real user service (`gaia service install host --node`),
+  # checks `gaia nodes` answers through it, then uninstalls it.
+  service:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      # The runner has no login session, so no systemd user manager. Start
+      # one with lingering: runner setup only; Gaia itself never runs this.
+      - if: runner.os == 'Linux'
+        run: |
+          sudo loginctl enable-linger "$USER"
+          uid=$(id -u)
+          for _ in $(seq 50); do [ -S "/run/user/$uid/bus" ] && break; sleep 0.2; done
+          echo "XDG_RUNTIME_DIR=/run/user/$uid" >> "$GITHUB_ENV"
+      - run: GAIA_SERVICE_E2E=1 CGO_ENABLED=0 go test -tags ts_omit_peerapiserver -count=1 -v -run '^TestServiceE2E$' ./cmd/gaia
+
+  build-all:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: make build-all
+
+  # Fails on any known vulnerability reachable from Gaia's code, and proves
+  # it can fail on a planted one (testdata/vulnmod).
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: make vulncheck
+      - run: make vulncheck-proof
+
+  licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: make licenses

@@ -1,0 +1,77 @@
+# GoReleaser v2 configuration for Gaia releases (ADR-0002, ADR-0012).
+#
+# Builds the six release targets with CGO off and the same build tags and
+# linker flags as the Makefile, then writes archives, a checksum file, one
+# SBOM per archive and keyless cosign signatures. The release is created as a
+# draft; .github/workflows/release.yml publishes it after the smoke tests
+# pass. A dry run is `goreleaser release --snapshot --clean --skip=sign`.
+version: 2
+
+project_name: gaia
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: gaia
+    main: ./cmd/gaia
+    binary: gaia
+    env:
+      - CGO_ENABLED=0
+    # Must match TAGS in the Makefile: ts_omit_peerapiserver removes tsnet's
+    # peer API server, which would open a TCP listener on all interfaces.
+    tags:
+      - ts_omit_peerapiserver
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }} -X main.commit={{ .ShortCommit }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: gaia
+    ids: [gaia]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+# One SPDX SBOM per archive, made with syft.
+sboms:
+  - artifacts: archive
+
+# Keyless signatures through the workflow's OIDC identity. Each signed file
+# gets a <file>.sigstore.json bundle holding the signature and certificate.
+signs:
+  - cmd: cosign
+    artifacts: all
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - --yes
+      - --bundle=${signature}
+      - ${artifact}
+    output: true
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
+
+changelog:
+  use: git
+  sort: asc
+
+release:
+  draft: true
+  replace_existing_draft: true
+  prerelease: auto

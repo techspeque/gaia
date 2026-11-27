@@ -1,0 +1,15 @@
+{
+  "nodes": [
+    {
+      "id": "node_7k2m9x4q1v8c3n5r6t0w2y4z80",
+      "name": "studio",
+      "tailnet_identity": "local",
+      "os": "linux",
+      "arch": "amd64",
+      "gaia_version": "0.1.0",
+      "api_version": 1,
+      "state": "online",
+      "last_seen": "2026-11-27T14:00:00Z"
+    }
+  ]
+}

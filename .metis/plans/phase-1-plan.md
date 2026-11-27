@@ -208,6 +208,7 @@ Tasks:
 - Before a session: fetch, then fast-forward the requested branch; create the local branch when it exists only on the remote
 - Fail with a typed error on a dirty checkout or a non-fast-forward, changing nothing (ADR-0010 rule 2)
 - After a session: push the branch if it is ahead, fast-forward only; on rejection leave the checkout as it is and report it (ADR-0010 rule 3)
+- Before a session: if the checkout is ahead of the remote with commits an earlier session could not push (exit 94), push them first; only if that push is rejected fail with 93, so a caller's retry does not redo finished work
 - Run git with structured argv and the node user's own credentials; never pass a credential, and never run `reset`, `rebase`, `stash`, `clean` or a forced push
 - Queue a second session for the same checkout behind the first
 - Test against local bare remotes: caller ahead, dirty checkout, diverged branch, rejected push, new branch, concurrent runs

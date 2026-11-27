@@ -1,0 +1,142 @@
+version: 1
+slices:
+    - id: phase-0-ws-0.1
+      title: Module scaffold and verify gate
+      type: feat
+      priority: p2
+      risk: medium
+      stage: foundation
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-0-plan.md
+      plan_section: §0.1
+      coded: true
+      reviewed: true
+      review_cycles: 1
+      created: ""
+    - id: phase-0-ws-0.2
+      title: Core types and contract constants
+      type: feat
+      priority: p2
+      risk: high
+      stage: foundation
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-0-plan.md
+      plan_section: §0.2
+      coded: true
+      reviewed: true
+      review_cycles: 0
+      created: ""
+    - id: phase-0-ws-0.3
+      title: SQLite store and migrations
+      type: feat
+      priority: p2
+      risk: medium
+      stage: foundation
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-0-plan.md
+      plan_section: §0.3
+      coded: true
+      reviewed: true
+      review_cycles: 1
+      created: ""
+    - id: phase-0-ws-0.4
+      title: Host daemon, local socket and logging
+      type: feat
+      priority: p2
+      risk: high
+      stage: foundation
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-0-plan.md
+      plan_section: §0.4
+      coded: true
+      reviewed: true
+      review_cycles: 1
+      created: ""
+    - id: phase-0-ws-0.5
+      title: CLI client and version negotiation
+      type: feat
+      priority: p2
+      risk: medium
+      stage: foundation
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-0-plan.md
+      plan_section: §0.5
+      coded: true
+      reviewed: true
+      review_cycles: 1
+      created: ""
+    - id: phase-0-ws-0.6
+      title: Tailnet join
+      type: feat
+      priority: p2
+      risk: high
+      stage: foundation
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-0-plan.md
+      plan_section: §0.6
+      coded: true
+      reviewed: true
+      review_cycles: 1
+      created: ""
+    - id: phase-0-ws-0.7
+      title: Node role, registration and heartbeat
+      type: feat
+      priority: p2
+      risk: high
+      stage: foundation
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-0-plan.md
+      plan_section: §0.7
+      coded: true
+      reviewed: true
+      review_cycles: 1
+      created: ""
+    - id: phase-0-ws-0.8
+      title: Release pipeline and install script
+      type: feat
+      priority: p2
+      risk: medium
+      stage: foundation
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-0-plan.md
+      plan_section: §0.8
+      coded: true
+      reviewed: true
+      review_cycles: 0
+      created: ""
+    - id: phase-0-ws-0.9
+      title: Service install
+      type: feat
+      priority: p2
+      risk: medium
+      stage: foundation
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-0-plan.md
+      plan_section: §0.9
+      coded: true
+      reviewed: true
+      review_cycles: 1
+      created: ""
+    - id: fix-0001
+      title: 'The licences check fails in CI: go-licenses finds no licence for github.com/jmespath/go-jmespath'
+      type: fix
+      priority: p0
+      risk: low
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-0-plan.md
+      plan_section: 'Workstream 0.8: Release pipeline and install script'
+      coded: true
+      reviewed: true
+      review_cycles: 0
+      notes: 'CI job ''licenses'' on the Phase 0 pull request (ubuntu-latest) fails: make licenses -> go-licenses v2.0.1 check ./... prints "Did not find license for library ''github.com/jmespath/go-jmespath''" and exits 1 (Makefile:104). The module is reached through tailscale.com on linux; reproduce with GOOS=linux, since a macOS run may not load it. Establish the module''s real licence from its source at the pinned version, and make the check pass honestly: prefer a fix that keeps the module checked; if go-licenses cannot detect it, ignore that one module by name in the Makefile with a comment stating its licence and where it was read, and keep every other module checked. Do not widen ALLOWED_LICENSES, do not ignore by pattern, do not drop the CI job. Confirm the release SBOM and any licence notices shipped in the archives still cover the module. Run the check for every release GOOS/GOARCH that changes the dependency set, not only the host''s.'
+      created: "2026-11-27"

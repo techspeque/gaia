@@ -221,7 +221,7 @@ Suggested packages:
 Acceptance criteria:
 - [ ] With `--tailnet`, the host answers `/api/v1/version` over the tailnet to an allowlisted peer and returns `403` to any other
 - [ ] Without `--tailnet`, no tsnet code runs and no network call is made, checked in a test
-- [ ] No listener is bound to 0.0.0.0 or to a LAN address in either mode
+- [ ] No Gaia listener (API, UI, node endpoint) is bound to 0.0.0.0 or to a LAN address in either mode; the embedded tailnet client's own WireGuard UDP socket is the tailnet transport and is not counted (decided 2026-11-27)
 - [ ] The auth key appears in no log line, process argument or API response
 - [ ] The control URL can point at Tailscale or Headscale, and the README covers both
 
@@ -267,7 +267,7 @@ Acceptance criteria:
 - **Blocked by:** 0.5
 
 Tasks:
-- Add GoReleaser and a release workflow building the six targets on a `v*` tag, with a dry run on manual dispatch
+- Add GoReleaser and a release workflow building the six targets on a `v*` tag, with a dry run on manual dispatch; build with the same tags as the `Makefile` (`ts_omit_peerapiserver`, decided in 0.6), and check the release binary opens no TCP listener on all interfaces after joining a tailnet
 - Publish checksums, keyless cosign signatures and an SBOM with each release (ADR-0012 rule 3)
 - Write `install.sh`, modelled on Metis's and Ship's, that verifies checksum and signature before installing
 - Run `govulncheck` and a licence check in CI
@@ -328,7 +328,7 @@ Composition scenarios to validate:
 - [ ] On two real machines on a tailnet, `gaia host --tailnet` on one and `gaia node --host … --join` on the other; `gaia nodes` on both lists both
 - [ ] Suspending or stopping the node machine shows it `offline`; bringing it back shows it `online` without a second join
 - [ ] Restarting the host keeps both nodes registered with the same ids
-- [ ] Listing listening sockets on both machines shows Gaia only on the tailnet interface, 127.0.0.1 and its local socket
+- [ ] Listing listening sockets on both machines shows Gaia's TCP listeners only on the tailnet interface and 127.0.0.1, plus its local socket; the only other socket is the tailnet client's WireGuard UDP port
 - [ ] A tailnet device that is not on the allowlist is refused by the host API
 - [ ] Every `-o json` output matches its recorded fixture
 - [ ] Both daemons run under the unit written by `gaia service install`, with no root, and are up after a reboot; `gaia service uninstall` leaves the state directory in place

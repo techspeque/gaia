@@ -1,1 +1,118 @@
-findings: []
+findings:
+    - id: f-001
+      date: "2026-11-27"
+      slice: phase-0-ws-0.1
+      severity: P2
+      category: correctness
+      finding: deps_test.go:141 — violation returns success for internal/core importing a module package outside internal/ (for example <module>/shared), contrary to brief line 59; isolated TestReviewCoreModuleImport reproduces this despite the green verify gate — enforce the core restriction for every module-local import before the internal-only early return and add a regression case.
+      status: resolved
+      resolved_by: commit 23098aad270e; test TestDependencyRuleRejects
+      cycle: 1
+      file: deps_test.go
+      commit: 23098aad270ea83f8b53646cf5ba28020cbc394e
+      evidence: test TestDependencyRuleRejects
+    - id: f-002
+      date: "2026-11-27"
+      slice: phase-0-ws-0.3
+      severity: P2
+      category: correctness
+      finding: internal/store/store.go:69-76 — A newer user_version present only in an uncheckpointed WAL bypasses the header check; Open then returns version_mismatch but its writer connection and Close checkpoint gaia.db and remove gaia.db-wal/gaia.db-shm. Reproduced with a version-1 header and committed version-2 WAL, violating brief lines 75-77. Detect the effective newer schema without modifying any original state files and add an Open-level WAL-recovery test asserting byte-identical directory contents on refusal.
+      status: resolved
+      resolved_by: commit dc1cdd792268; test TestNewerSchemaInWALRefusedAndUntouched; dc1cdd7
+      cycle: 1
+      file: internal/store/store.go
+      commit: dc1cdd7922683bcde1218e34f5fb80ce45d08c3e
+      evidence: test TestNewerSchemaInWALRefusedAndUntouched
+    - id: f-003
+      date: "2026-11-27"
+      slice: phase-0-ws-0.4
+      severity: P2
+      category: behavior
+      finding: cmd/gaia/daemon.go:111 — If Serve completes before the select (including normal SIGTERM cancellation), this branch consumes its only result, then line 122 waits forever for a second result; reproduced with TestReviewShutdownCompletion by allowing Serve to finish before the select, which logs API server stopped with err:null and hangs. Consume the server completion exactly once, preserve exit 0 for normal signal shutdown, and add a regression covering this ordering.
+      status: resolved
+      resolved_by: commit 0bddfa5b76a7; test TestShutdownServerResultConsumedOnce
+      cycle: 1
+      file: cmd/gaia/daemon.go
+      commit: 0bddfa5b76a76c1b0e0dd189931b5c72030e6a06
+      evidence: test TestShutdownServerResultConsumedOnce
+    - id: f-004
+      date: "2026-11-27"
+      slice: phase-0-ws-0.4
+      severity: P2
+      category: behavior
+      finding: internal/logging/logging.go:65 — Replacing secret bytes across the encoded JSON also replaces unquoted numeric tokens and can corrupt the log record. TestReviewNumericSecretJSON registers secret 123456 and logs count=123456, producing "count":[REDACTED], which json.Valid rejects. Make redaction JSON-aware or redact values before encoding while preserving late-bound secret coverage, and add a numeric-secret regression that asserts valid JSON.
+      status: resolved
+      resolved_by: commit 9c4e816ca344; test TestNumericSecretKeepsJSONValid
+      cycle: 1
+      file: internal/logging/logging.go
+      commit: 9c4e816ca344c12eb71a3495689d1083c524eb67
+      evidence: test TestNumericSecretKeepsJSONValid
+    - id: f-005
+      date: "2026-11-27"
+      slice: phase-0-ws-0.5
+      severity: P3
+      category: correctness
+      finding: 'cmd/gaia/cli/nodes.go:52 — flag.Parse writes unprefixed diagnostics: gaia nodes --bogus prints "flag provided but not defined: -bogus" and gaia nodes -o prints "flag needs an argument: -o", violating the brief requirement that CLI errors start with "gaia: ". Capture or suppress the default parser diagnostic and emit one prefixed error followed by usage, preserving exit 98 and help behavior; extend TestNodesUsage to assert the prefix.'
+      status: resolved
+      resolved_by: commit 237642a422d4; test TestNodesUsage
+      cycle: 1
+      file: cmd/gaia/cli/nodes.go
+      commit: 237642a422d4d94cf0f66d1a97a761c34551556d
+      evidence: test TestNodesUsage
+    - id: f-006
+      date: "2026-11-27"
+      slice: phase-0-ws-0.6
+      severity: P3
+      category: protocol
+      finding: .metis/briefs/phase-0-ws-0.6.md:64 — The brief specifies permission_denied for tailnet refusal, but internal/host/host.go:143 and its tests return the existing core.CodeForbidden wire value forbidden (internal/core/error.go:18). The implementation and committed contract disagree — correct the brief to name the existing forbidden code, per the reality-beats-documents rule, so the slice contract matches its API.
+      status: resolved
+      resolved_by: commit d40345a8974a; .metis/briefs/phase-0-ws-0.6.md:64
+      cycle: 1
+      file: metis/briefs/phase-0-ws-0.6.md
+      commit: d40345a8974a0f6f7ed8f5e74e78722973f03fd1
+      evidence: .metis/briefs/phase-0-ws-0.6.md:64
+    - id: f-007
+      date: "2026-11-27"
+      slice: phase-0-ws-0.7
+      severity: P3
+      category: behavior
+      finding: 'cmd/gaia/node.go:111 — --join without an auth key is accepted whenever HasState is true, contrary to the unconditional rejection in brief lines 111-115. Reproduced with a nonempty tsnet state file and both key variables empty: the child reaches the tailnet trap (exit 97), instead of rejecting the missing key (exit 1). Remove the HasState exception from the --join key check and cover both fresh and existing state in TestNodeStartErrors.'
+      status: resolved
+      resolved_by: commit e0d4d303b18c; test TestNodeStartErrors
+      cycle: 1
+      file: cmd/gaia/node.go
+      commit: e0d4d303b18cb871860c96d29cb956d0097dcca7
+      evidence: test TestNodeStartErrors
+    - id: f-008
+      date: "2026-11-27"
+      slice: phase-0-ws-0.9
+      severity: P2
+      category: behavior
+      finding: 'internal/service/service.go:132 — Install writes the desired unit before applying it, then treats byte equality as proof it was applied. Reproduced on Linux by failing daemon-reload during an update and on macOS by failing bootout: retry returns Changed=false with no mutating commands while the old configuration remains loaded. Preserve/recover pending application or restore the prior file on failure so retry actually applies the desired configuration; add failed-update/retry regression tests for both platforms.'
+      status: resolved
+      resolved_by: commit 9a04f6d7be6d; test TestInstallFailedUpdateRetried
+      cycle: 1
+      file: internal/service/service.go
+      commit: 9a04f6d7be6d666b20a5dbdfad90bb207fce2181
+      evidence: test TestInstallFailedUpdateRetried
+    - id: f-009
+      date: "2026-11-27"
+      slice: phase-0-ws-0.9
+      severity: P2
+      category: behavior
+      finding: internal/service/render.go:31 — Environment= reuses ExecStart dollar escaping, rendering XDG_RUNTIME_DIR=/run/a$b as /run/a$$b. systemd.exec specifies that Environment= performs no variable expansion, so the daemon uses a different socket directory from the CLI. Use directive-specific quoting that preserves literal dollars in environment values and add a regression test covering dollar-containing socket paths.
+      status: resolved
+      resolved_by: commit 26ea2fa008ef; test TestRenderSystemdEnvDollar
+      cycle: 1
+      file: internal/service/render.go
+      commit: 26ea2fa008ef05d65737931af36926ae91db0642
+      evidence: test TestRenderSystemdEnvDollar
+    - id: f-010
+      date: "2026-11-27"
+      slice: phase-0-ws-0.9
+      severity: P3
+      category: maint
+      finding: README.md:162 — The statement that the service survives logout and reboot is too broad for the selected macOS gui/UID LaunchAgent, which runs in the login session. Clarify macOS logout and next-login behavior while retaining the brief-decided LaunchAgent mechanism.
+      status: advisory
+      cycle: 1
+      file: README.md
