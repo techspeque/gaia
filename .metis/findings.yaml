@@ -116,3 +116,11 @@ findings:
       status: advisory
       cycle: 1
       file: README.md
+    - id: f-011
+      date: "2026-11-27"
+      slice: phase-0-gate
+      severity: P3
+      category: ""
+      finding: 'Gate run 1 (v0.0.1): a TLS handshake failure on the host''s tailnet listener logs ''http: TLS handshake error from %!s(<nil>): remote error: tls: unknown certificate authority'' (http.Server ErrorLog via internal/host/host.go:107); the peer address is missing, so the warning cannot be tied to a device. Seen when a tailnet client without the self-signed certificate connected.'
+      status: advisory
+      file: http.Server
