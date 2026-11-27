@@ -80,8 +80,8 @@ Design decisions:
 
 ## Declared file scope
 
-- **owned_paths:** internal/net/, internal/host/, cmd/gaia/daemon.go, cmd/gaia/daemon_test.go, cmd/gaia/tailnet_test.go, cmd/gaia/main.go, README.md, go.mod, go.sum
-- **read_only_paths:** internal/core/, internal/logging/, internal/sock/, internal/store/, internal/node/, cmd/gaia/cli/, deps_test.go, OVERVIEW.md, .metis/adr/, Makefile
+- **owned_paths:** internal/net/, internal/host/, cmd/gaia/daemon.go, cmd/gaia/daemon_test.go, cmd/gaia/tailnet_test.go, cmd/gaia/main.go, README.md, go.mod, go.sum, Makefile, docs/contracts/launcher-v1.md
+- **read_only_paths:** internal/core/, internal/logging/, internal/sock/, internal/store/, internal/node/, cmd/gaia/cli/, deps_test.go, OVERVIEW.md, .metis/adr/
 
 ## Definition of Done
 
@@ -119,7 +119,9 @@ Design decisions:
 
 ## Out-of-scope touches
 
-None.
+Added by the Human on 2026-11-27, both now in owned_paths:
+- `Makefile`: the `ts_omit_peerapiserver` build tag only (second decision below).
+- `docs/contracts/launcher-v1.md`: one line the Human changed and committed under this slice's id, saying Metis syncs around a remote session from v0.0.25. Not the coder's work; nothing for the Reviewer to judge beyond that line.
 
 ## Open question (human)
 
