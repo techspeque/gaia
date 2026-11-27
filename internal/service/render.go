@@ -6,11 +6,18 @@ import (
 	"strings"
 )
 
-// systemdQuote quotes one word for ExecStart= or Environment=: in double
-// quotes, with backslash and quote escaped, and $ and % doubled so systemd
-// expands neither.
+// systemdQuote quotes one word for ExecStart=: in double quotes, with
+// backslash and quote escaped, and $ and % doubled so systemd expands
+// neither.
 func systemdQuote(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `$$`, `%`, `%%`)
+	return `"` + r.Replace(s) + `"`
+}
+
+// systemdEnvQuote quotes one assignment for Environment=, which expands
+// specifiers but not variables: % is doubled and $ is left as it is.
+func systemdEnvQuote(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `%`, `%%`)
 	return `"` + r.Replace(s) + `"`
 }
 
@@ -28,7 +35,7 @@ func renderSystemd(s Spec) []byte {
 	}
 	b.WriteString("ExecStart=" + strings.Join(words, " ") + "\n")
 	for _, e := range s.Env {
-		b.WriteString("Environment=" + systemdQuote(e.Name+"="+e.Value) + "\n")
+		b.WriteString("Environment=" + systemdEnvQuote(e.Name+"="+e.Value) + "\n")
 	}
 	for _, n := range s.Unset {
 		b.WriteString("UnsetEnvironment=" + n + "\n")

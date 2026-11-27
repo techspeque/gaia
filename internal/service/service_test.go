@@ -78,6 +78,19 @@ func TestRenderSystemd(t *testing.T) {
 	}
 }
 
+// Environment= does no variable expansion, so a $ in a socket path is
+// written as it is, not doubled as in ExecStart=.
+func TestRenderSystemdEnvDollar(t *testing.T) {
+	b, err := Render(Platform{GOOS: "linux"}, Spec{Args: spec.Args,
+		Env: []EnvVar{{"XDG_RUNTIME_DIR", `/run/a$b%c"d`}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `Environment="XDG_RUNTIME_DIR=/run/a$b%%c\"d"` + "\n"; !strings.Contains(string(b), want) {
+		t.Errorf("unit lacks %q:\n%s", want, b)
+	}
+}
+
 func TestRenderLaunchd(t *testing.T) {
 	p := Platform{GOOS: "darwin", Home: "/Users/a"}
 	s := spec
