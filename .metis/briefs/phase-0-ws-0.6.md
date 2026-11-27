@@ -130,6 +130,12 @@ change it in tsnet v1.98.8). Plan §0.6 says "no listener is bound to
 TCP/API listeners; the WireGuard UDP socket is the tailnet transport ADR-0004
 accepted. Needs a person's decision before code.
 
+**Decided by the Human, 2026-11-27:** the proposed reading is accepted. The
+criterion covers Gaia's own listeners; the WireGuard UDP socket is not
+counted. Plan §0.6, the gate scenario and OVERVIEW §3 are amended to say so.
+The other decisions in this brief (tsnet v1.98.8, log upload disabled,
+empty allowlist refuses to start, auth key from environment or file) stand.
+
 ## Report
 
 Filled at implementation.
