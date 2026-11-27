@@ -12,6 +12,49 @@ reach each other over a tailnet, with no ports to open.
 
 Open source under the MIT licence, self-hosted only, no telemetry.
 
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/techspeque/gaia/main/scripts/install.sh | sh
+```
+
+The script installs `gaia` into `~/.local/bin` for the current user, with no
+root. It installs nothing until both checks pass:
+
+- **Signature.** With [cosign](https://docs.sigstore.dev/cosign/system_config/installation/)
+  on `PATH`, it verifies the keyless signature of `checksums.txt`, which must
+  come from this repository's release workflow on a `v*` tag. Without cosign
+  it warns and checks the checksum only; set `GAIA_REQUIRE_SIGNATURE=1` to
+  refuse instead.
+- **Checksum.** The archive's sha256 must match its line in `checksums.txt`.
+
+Set `GAIA_VERSION=v0.1.0` for a given release (default: the latest) and
+`GAIA_INSTALL_DIR` for another directory. Each release also carries an SPDX
+SBOM per archive (`*.sbom.json`) and a signature bundle per file
+(`*.sigstore.json`).
+
+## Platforms
+
+Release archives are built for exactly six targets: darwin, linux and
+windows, each on amd64 and arm64, all with CGO off. `install.sh` covers
+darwin and linux. On Windows the daemon roles refuse to start for now.
+
+What CI checks, on every push:
+
+| Check | Where it runs |
+|---|---|
+| `make verify` (gofmt, vet, staticcheck, all tests) | linux/amd64 (`ubuntu-latest`), darwin/arm64 (`macos-latest`) |
+| `make build-all` (all six targets compile, CGO off) | linux/amd64 |
+| `govulncheck` and the licence check | linux/amd64 |
+| `install.sh` tests (part of `make verify`) | linux/amd64, darwin/arm64 |
+
+And on every release (and its dry run): the six archives, checksums and
+SBOMs are checked, and the linux/amd64 and linux/arm64 binaries are checked
+to be static, run in a container with no Go toolchain and no libc, and pass
+the release smoke tests (no network request in local-only mode, no TCP
+listener after joining a tailnet). darwin and windows release binaries are
+built but not run in CI.
+
 ## Build
 
 Requires the Go version pinned in `go.mod`. CGO is always off.
@@ -20,6 +63,15 @@ Requires the Go version pinned in `go.mod`. CGO is always off.
 make build        # dist/gaia for this machine
 make build-all    # darwin, linux, windows × amd64, arm64 into dist/
 make verify       # gofmt, go vet, staticcheck, tests
+```
+
+Release tooling (fetches pinned tools, so it needs the network):
+
+```sh
+make snapshot     # release dry run into dist/: archives, checksums, SBOMs (needs syft)
+make release-smoke GAIA_RELEASE_BIN=dist/gaia_linux_amd64_v1/gaia
+make vulncheck    # govulncheck; fails on a reachable known vulnerability
+make licenses     # every dependency under a permissive licence
 ```
 
 ```sh

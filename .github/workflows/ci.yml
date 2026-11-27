@@ -30,3 +30,24 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make build-all
+
+  # Fails on any known vulnerability reachable from Gaia's code, and proves
+  # it can fail on a planted one (testdata/vulnmod).
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: make vulncheck
+      - run: make vulncheck-proof
+
+  licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: make licenses

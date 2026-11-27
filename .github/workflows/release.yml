@@ -1,0 +1,112 @@
+name: release
+
+# A v* tag builds, smoke-tests and publishes a release. A manual dispatch is
+# a dry run: the same build and smoke tests, nothing signed, nothing
+# published (ADR-0012 rule 3).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GORELEASER_VERSION: "v2.20.3"
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the draft release
+      id-token: write # keyless cosign signing
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: sigstore/cosign-installer@v4
+      - uses: anchore/sbom-action/download-syft@v0
+      - name: release (draft)
+        if: github.event_name == 'push'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: ${{ env.GORELEASER_VERSION }}
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: dry run (publishes nothing)
+        if: github.event_name != 'push'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: ${{ env.GORELEASER_VERSION }}
+          args: release --snapshot --clean --skip=sign
+      - name: check the artifacts
+        run: sh scripts/check-dist.sh dist
+      - uses: actions/upload-artifact@v5
+        with:
+          name: dist
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sbom.json
+            dist/*.sigstore.json
+            dist/checksums.txt
+          if-no-files-found: error
+
+  smoke:
+    needs: goreleaser
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v6
+        with:
+          name: dist
+          path: dist
+      - name: unpack the linux binary
+        run: |
+          set -eu
+          archive=$(ls dist/gaia_*_linux_${{ matrix.arch }}.tar.gz)
+          mkdir -p release
+          tar -xzf "$archive" -C release gaia
+          echo "GAIA_RELEASE_BIN=$PWD/release/gaia" >> "$GITHUB_ENV"
+      - name: the binary is static
+        run: |
+          set -eu
+          file release/gaia
+          file release/gaia | grep -q 'statically linked'
+      - name: the binary runs with no Go toolchain and no libc
+        run: |
+          set -eu
+          out=$(docker run --rm --network none -v "$PWD/release:/r:ro" busybox:stable /r/gaia --version)
+          echo "$out"
+          case "$out" in "gaia "*" linux/${{ matrix.arch }}") ;; *) exit 1 ;; esac
+      - name: install strace
+        run: sudo apt-get update && sudo apt-get install -y strace
+      - name: release smoke tests
+        run: make release-smoke
+
+  publish:
+    if: github.event_name == 'push'
+    needs: smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: publish the draft release
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

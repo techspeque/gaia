@@ -135,4 +135,37 @@ None.
 
 ## Report
 
-Filled at implementation.
+- **Built:** `.goreleaser.yaml` (six targets, CGO off, `-trimpath`,
+  `ts_omit_peerapiserver`, Makefile ldflags; tar.gz/zip archives, sha256
+  `checksums.txt`, SPDX SBOM per archive, cosign keyless `--bundle`
+  signatures on every artifact, draft release); `.github/workflows/release.yml`
+  (tag: draft release → smoke on linux amd64 + arm64 → publish; dispatch:
+  snapshot with `--skip=sign`, no publish); `ci.yml` jobs `vulncheck`
+  (+ `vulncheck-proof`) and `licenses`; `scripts/install.sh`;
+  `scripts/check-dist.sh`; `cmd/gaia/release_test.go`; `install_test.go`;
+  `testdata/vulnmod`; Makefile targets `snapshot`, `release-smoke`,
+  `vulncheck`, `vulncheck-proof`, `licenses`; README "Install" and "Platforms".
+- **Tool pins:** GoReleaser v2.20.3, govulncheck v1.10.0, go-licenses v2.0.1.
+  GoReleaser and govulncheck are `go install`ed into `.local/bin` (ignored):
+  `go run` hides govulncheck's exit code, and for GoReleaser (needs Go ≥
+  1.27.4) it passed the switched toolchain into Gaia's build, which then
+  failed (go-json-experiment). Installed binaries build Gaia with the
+  `go.mod` toolchain.
+- **Run locally (darwin/arm64):** `goreleaser check` OK; `make snapshot` →
+  6 archives, `checksums.txt`, 6 SBOMs, `check-dist` OK, nothing published;
+  `make release-smoke` on the snapshot darwin binary: 3/3 pass; against a
+  binary built without the tag, `TestReleaseBuildSettings` and
+  `TestReleaseTailnetNoTCPListener` fail (`TCP *:58436 (LISTEN)`), so both
+  checks bite; `go test -run TestInstall .` 10/10; `make vulncheck-proof` OK
+  (exit 3, GO-2021-0113); `make licenses` OK; `make verify` green.
+- **Not run locally:** the strace path of `TestReleaseNoNetworkLocalOnly`,
+  the static/busybox checks and arm64 (linux-only; Docker not permitted in
+  this session). They run first in the release workflow.
+- **Open, needs a person:** `make vulncheck` FAILS on the current module:
+  ~15 reachable stdlib vulnerabilities in go1.26.3 (e.g. GO-2026-6859,
+  GO-2026-6613, fixed by go1.26.11) and GO-2026-6865 in
+  `github.com/klauspost/compress` v1.18.5 (indirect via tailscale, fixed
+  v1.20.2). Tried in a throwaway worktree: `go get go@1.26.11
+  github.com/klauspost/compress@v1.20.3` gives "No vulnerabilities found" and
+  `make verify` green. `go.mod`/`go.sum` are read-only for this slice and the
+  toolchain pin was kept deliberately in 0.6, so the bump is not made here.
