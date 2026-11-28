@@ -157,3 +157,12 @@ findings:
       status: open
       cycle: 1
       file: cmd/gaia/name.go
+    - id: f-016
+      date: "2026-11-28"
+      slice: fix-0003
+      severity: P2
+      category: behavior
+      finding: README.md:173 — The documented host migration deletes tsnet and name but leaves gaia.db, then restarts without --name. Legacy-name resolution therefore requests studio again, not the promised gaia-studio (TestReviewREADMEHostRejoin); nodes following the next instruction cannot reach the host by its new name. — Include an explicit --name gaia-<machine> in the host re-join command while preserving the registry, and verify the documented migration selects the new name.
+      status: open
+      cycle: 1
+      file: README.md
