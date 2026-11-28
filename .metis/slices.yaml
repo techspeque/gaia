@@ -1,19 +1,5 @@
 version: 1
 slices:
-    - id: fix-0005
-      title: 'Four small advisories from the Phase 0 gate: stale-host hint, TLS error log, tailnet state directory, macOS service wording'
-      type: fix
-      priority: p1
-      risk: low
-      coder: claude-code/opus-5-5
-      reviewer: codex/gpt-6-astra
-      plan: .metis/plans/phase-0-plan.md
-      plan_section: 'Workstream 0.7: Node role, registration and heartbeat'
-      coded: true
-      reviewed: true
-      review_cycles: 0
-      notes: 'Advisories f-018, f-011, f-013 and f-010. (1) f-018: a node whose --host names a tailnet device that exists but is offline retries ''context deadline exceeded'' with no hint; fix-0003''s hint covers only a reachable device with nothing on port 443. Give a hint for this case too, naming the device and saying it is offline or not a Gaia host. (2) f-011: a TLS handshake failure on the host''s tailnet listener logs ''http: TLS handshake error from %!s(<nil>)'' (http.Server ErrorLog, internal/host/host.go:107): the peer address is missing; log the peer so the warning can be tied to a device. (3) f-013: the tailnet client logs ''using system state directory'' and creates an empty ~/.local/share/tailscale outside Gaia''s state directory on first join, though log upload is disabled (internal/net/tailnet.go:81); keep everything inside the state directory, or if tsnet gives no way, say so in README where it lists what the state directory holds. (4) f-010: README.md:162 says the service survives logout and reboot, which is too broad for the macOS LaunchAgent, which runs in the login session; state the macOS behaviour at logout and next login, keeping the LaunchAgent mechanism. Resolve each finding with its evidence.'
-      created: "2026-11-28"
     - id: phase-1-ws-1.1
       title: Session model, store and API types
       type: feat
