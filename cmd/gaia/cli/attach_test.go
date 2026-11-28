@@ -251,6 +251,34 @@ func TestAttachSessionEnds(t *testing.T) {
 	}
 }
 
+// A host slow to answer, past endWait, gets the fallback 0 once endWait
+// expires, not its late answer.
+func TestAttachSessionEndsSlowHost(t *testing.T) {
+	p := newTTYPeer()
+	d := newSessionDaemon()
+	d.mux.HandleFunc("GET "+core.SessionTTYPath(ttyID), p.handler(core.SessionInteractive, func(ctx context.Context, c *websocket.Conn) {
+		_ = c.Close(websocket.StatusNormalClosure, "the session has ended")
+	}))
+	d.mux.HandleFunc("GET "+core.SessionPath(ttyID), func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(endWait + 2*time.Second):
+		case <-r.Context().Done():
+			return
+		}
+		writeJSON(w, http.StatusOK, core.GetSessionResponse{Session: exited(7)})
+	})
+	c := &Client{Dir: fakeDaemon(t, d)}
+	start := time.Now()
+	code, _, errOut := runAttach(c, nil, nil)
+	elapsed := time.Since(start)
+	if code != 0 || !strings.Contains(errOut, "has not recorded its exit yet") {
+		t.Errorf("exit %d %q", code, errOut)
+	}
+	if elapsed > endWait+time.Second {
+		t.Errorf("waited %v; want about %v", elapsed, endWait)
+	}
+}
+
 func TestAttachConnectionDrops(t *testing.T) {
 	p := newTTYPeer()
 	c := attachDaemon(t, p.handler(core.SessionInteractive, func(ctx context.Context, c *websocket.Conn) {

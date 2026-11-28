@@ -169,9 +169,11 @@ func attach(ctx context.Context, id core.SessionID, env Env) int {
 }
 
 // sessionEnded reports how the session ended, once the host knows, and
-// returns the exit code for it.
+// returns the exit code for it. endWait bounds the whole wait, each request
+// included: past it, the fallback 0.
 func sessionEnded(ctx context.Context, id core.SessionID, env Env) int {
-	deadline := time.Now().Add(endWait)
+	ctx, cancel := context.WithTimeout(ctx, endWait)
+	defer cancel()
 	for {
 		sess, err := env.Client.GetSession(ctx, id)
 		if err == nil && sess.State.Terminal() {
@@ -182,11 +184,12 @@ func sessionEnded(ctx context.Context, id core.SessionID, env Env) int {
 			fmt.Fprintf(env.Stderr, "gaia: session %s %s\n", id, sess.State)
 			return 1
 		}
-		if time.Now().After(deadline) {
+		select {
+		case <-ctx.Done():
 			fmt.Fprintf(env.Stderr, "gaia: session %s ended; the host has not recorded its exit yet (`gaia ls` shows it)\n", id)
 			return 0
+		case <-time.After(100 * time.Millisecond):
 		}
-		time.Sleep(100 * time.Millisecond)
 	}
 }
 
