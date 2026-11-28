@@ -207,3 +207,12 @@ findings:
       resolved_by: commit b67f02bed73a; test TestDialHint
       commit: b67f02bed73a62a60cac80c43bc60b624b36c85c
       evidence: test TestDialHint
+    - id: f-019
+      date: "2026-11-28"
+      slice: phase-1-ws-1.1
+      severity: P2
+      category: correctness
+      finding: 'internal/store/migrations/0003_sessions.sql:32 — INSERT OR REPLACE bypasses terminal-row freezing: with recursive_triggers off, replacing an exited row with the same id and state starting succeeds, deletes its outcome and does not fire sessions_no_delete; this violates the brief requirement that terminal rows cannot move to any state through raw SQL. Refuse replacement of existing session ids at the schema boundary and add a regression covering REPLACE against terminal rows.'
+      status: open
+      cycle: 1
+      file: internal/store/migrations/0003_sessions.sql
