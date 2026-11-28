@@ -294,9 +294,12 @@ findings:
       severity: P2
       category: behavior
       finding: 'internal/node/sessionapi.go:109 — limitWriter returns errLimit only when a chunk exceeds the remaining snapshot, not when it exactly exhausts it. Reproduced with fakeagent print:ready sleep:1h: non-follow logs writes ready then hangs until the request deadline instead of returning. Return the limit sentinel immediately when the remaining count reaches zero and add an idle-running-agent regression test.'
-      status: open
+      status: resolved
+      resolved_by: commit 052236992ee2; test TestNodeAPILogsIdleRunningAgent
       cycle: 1
       file: internal/node/sessionapi.go
+      commit: 052236992ee2d12c931baec09b7edf32104c3ba3
+      evidence: test TestNodeAPILogsIdleRunningAgent
     - id: f-027
       date: "2026-11-28"
       slice: phase-1-ws-1.4
