@@ -43,9 +43,13 @@ const usage = `usage: gaia <command> [flags]
                                 the host; --name as for the host
   nodes [-o text|json]          list the machines registered with the host
   nodes remove NAME             remove a retired machine from the registry
-  run --node NODE --detach [--profile P] -- ARGV...
-                                start ARGV on NODE as a session and print
-                                its id; the session runs on
+  run --node NODE (--detach | --interactive) [--profile P] -- ARGV...
+                                start ARGV on NODE as a session; --detach
+                                prints its id, --interactive gives it a
+                                terminal and attaches; the session runs on
+  attach SESSION                show a session's terminal, recent output
+                                first; input goes to an interactive
+                                session; Ctrl-] detaches
   ls [-o text|json]             list the sessions the host knows
   stop SESSION                  stop a session (SIGTERM, SIGKILL after 10s)
   logs SESSION [-f|--follow]    print a session's output; --follow until
@@ -80,6 +84,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cli.Nodes(args[1:], cliEnv(stdout, stderr))
 	case "run":
 		return cli.Run(args[1:], cliEnv(stdout, stderr))
+	case "attach":
+		return cli.Attach(args[1:], cliEnv(stdout, stderr))
 	case "ls":
 		return cli.Ls(args[1:], cliEnv(stdout, stderr))
 	case "stop":
@@ -100,9 +106,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 // cliEnv is the environment of the client commands: the default runtime
-// directory and this binary's API and Gaia versions.
+// directory, this binary's API and Gaia versions, and the process's
+// standard input and its terminal, if any.
 func cliEnv(stdout, stderr io.Writer) cli.Env {
-	return cli.Env{Stdout: stdout, Stderr: stderr, Client: &cli.Client{Version: version}}
+	return cli.Env{
+		Stdout: stdout, Stderr: stderr,
+		Stdin: os.Stdin, Term: cli.StdinTerminal(),
+		Client: &cli.Client{Version: version},
+	}
 }
 
 // versionString formats the one-line --version output.

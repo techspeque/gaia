@@ -166,4 +166,50 @@ None.
 
 ## Report
 
-Filled at implementation.
+- Added: `internal/core/tty.go` (+test: `SessionTTYPath`,
+  `NodeSessionTTYPath`, `TTYMessage` and its types, `TTYCloseNormal`,
+  `CheckOrigin`, which parses the origin by hand because core may not
+  import `net/url`); `internal/tty/tty.go` (+test: `Terminal`, `Serve`,
+  `Dial`, `ResponseError`, `ErrDropped`); `internal/node/tty.go` (+test:
+  `ReplayBytes`, `LocalSessions.AttachSession`, `SessionClient.AttachSession`,
+  the node API tty route); `internal/host/tty_test.go`;
+  `cmd/gaia/cli/attach.go` (+test: `Client.Attach`, `gaia attach`,
+  `Terminal`, `StdinTerminal`, `DetachKey`), `term_unix.go` (SIGWINCH),
+  `term_other.go`; `cmd/gaia/attach_test.go`.
+- Edited: `go.mod` (coder/websocket and x/term are now direct; go.sum is
+  unchanged); `internal/host/session.go` (`NodeSessions.AttachSession`, the
+  `GET …/sessions/{id}/tty` route on both muxes); `internal/host/host.go`
+  (`statusRecorder.Hijack`: the WebSocket library asks the writer itself,
+  and the upgrade failed with 501 without it); `internal/host/session_test.go`
+  (the fake node attaches); `internal/node/sessionapi.go` (route);
+  `internal/node/remote.go` (the recovering transport keeps a 101 body
+  writable); `cmd/gaia/cli/nodes.go` (`Env.Stdin`, `Env.Term`);
+  `cmd/gaia/cli/sessions.go` (`run --interactive`);
+  `cmd/gaia/main.go` (dispatch, usage, env).
+- Not touched, though listed: `cmd/gaia/node.go`, `cmd/gaia/daemon.go`,
+  `cmd/gaia/cli/sessions_test.go` (the `run --interactive` flag tests are in
+  `attach_test.go`), `internal/node/remote_test.go` (the forwarder upgrade
+  test, `TestForwarderPassesUpgrade`, is in `internal/node/tty_test.go`,
+  with the link both ready and not ready).
+- Tests: every test in the test plan exists and passes. `make verify`:
+  green. `go test -race` on tty, host, node (attach tests), cli: green.
+  `-count=5` on host, tty and cli, and on `TestAttach*`: green.
+  `GOOS=windows` and `GOOS=linux go vet ./...`: clean. Linux tests not run
+  locally (CI runs them).
+- Decisions:
+  - The CLI sends its size before it pumps any input, so an agent reads
+    typed input only after its terminal has the caller's size. Until the
+    first attach, an interactive session has the PTY's default size: the
+    start request has no size (outside this scope).
+  - A session that ended while attached exits with the agent's exit code
+    (1 if there is none), for both `attach` and `run --interactive`.
+    Detaching, or SIGINT/SIGTERM/SIGHUP, exits 0. A dropped connection
+    exits 95.
+  - Notices from a node are not relayed by the host. The host's own `Serve`
+    already drops headless input with its own notice.
+  - Two host-test races were in the tests, not the code (after a session
+    ends, input to it is moot, and the agent read its size before the
+    first resize). Both tests were fixed to wait for the right event.
+- Notes for later slices: the detach key is a single Ctrl-], so an agent
+  can never receive that byte; an escape for it would be new work. The
+  public-link input gate (Phase 4) belongs in the host's tty route.

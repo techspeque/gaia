@@ -271,6 +271,7 @@ func SessionHandler(s *LocalSessions, check PeerCheck, log *slog.Logger) http.Ha
 		}
 		fw.Finish()
 	})
+	mux.HandleFunc("GET "+core.NodeSessionsPath+"/{id}/tty", serveTTY(s, log))
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, core.NewError(core.CodeNotFound, "no such endpoint"))
 	})

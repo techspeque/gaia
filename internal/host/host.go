@@ -9,6 +9,7 @@
 package host
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -572,6 +573,12 @@ func (r *statusRecorder) WriteHeader(code int) {
 
 // Unwrap lets http.ResponseController flush a streamed response.
 func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
+// Hijack hands over the connection of an upgrade (a terminal WebSocket),
+// which the WebSocket library asks the writer itself for.
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return http.NewResponseController(r.ResponseWriter).Hijack()
+}
 
 func (s *Server) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

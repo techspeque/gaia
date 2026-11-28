@@ -16,6 +16,10 @@ import (
 // Env is what a client command needs from its process.
 type Env struct {
 	Stdout, Stderr io.Writer
+	// Stdin is what the caller types, for `gaia attach`. Nil: nothing.
+	Stdin io.Reader
+	// Term is the caller's terminal on Stdin, nil when Stdin is not one.
+	Term Terminal
 	// Client reaches the daemon.
 	Client *Client
 	// Now is the clock for relative times. Default: time.Now.

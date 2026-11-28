@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/techspeque/gaia/internal/core"
+	"github.com/techspeque/gaia/internal/tty"
 )
 
 // fakeNode is a node's sessions as a test drives them.
@@ -19,6 +20,7 @@ type fakeNode struct {
 	start    func(core.NodeStartRequest) (core.NodeSession, error)
 	stop     func(core.SessionID) (core.NodeSession, error)
 	logs     func(off int64, follow bool, w io.Writer) error
+	attach   func(core.SessionID) (tty.Terminal, error)
 	started  []core.NodeStartRequest
 	stopped  []core.SessionID
 	routeErr error
@@ -36,6 +38,13 @@ func (f *fakeNode) StopSession(_ context.Context, id core.SessionID) (core.NodeS
 
 func (f *fakeNode) SessionLogs(_ context.Context, _ core.SessionID, off int64, follow bool, w io.Writer) error {
 	return f.logs(off, follow, w)
+}
+
+func (f *fakeNode) AttachSession(_ context.Context, id core.SessionID) (tty.Terminal, error) {
+	if f.attach == nil {
+		return nil, core.NewError(core.CodeUnavailable, "no terminal in this test")
+	}
+	return f.attach(id)
 }
 
 // fakeRouter routes every node to node.

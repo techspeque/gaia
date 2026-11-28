@@ -11,6 +11,7 @@ import (
 
 	"github.com/techspeque/gaia/internal/core"
 	"github.com/techspeque/gaia/internal/store"
+	"github.com/techspeque/gaia/internal/tty"
 )
 
 // NodeSessions is a node's session manager as the host drives it.
@@ -27,6 +28,10 @@ type NodeSessions interface {
 	// SessionLogs writes the session's scrollback from byte offset off to
 	// w: what exists, or with follow everything until the session ends.
 	SessionLogs(ctx context.Context, id core.SessionID, off int64, follow bool, w io.Writer) error
+	// AttachSession attaches to the session's terminal: recent output
+	// replayed, then live; input and resizes for an interactive session.
+	// ctx bounds the attaching; the attachment lasts until it is closed.
+	AttachSession(ctx context.Context, id core.SessionID) (tty.Terminal, error)
 }
 
 // NodeRouter finds how to reach a node's sessions: in-process for the
@@ -54,6 +59,7 @@ func (s *Server) sessionRoutes(mux *http.ServeMux, socket bool) {
 	mux.HandleFunc(core.SessionsPath+"/{id}", s.methods(map[string]handler{http.MethodGet: s.getSessionHTTP}))
 	mux.HandleFunc(core.SessionsPath+"/{id}/stop", s.methods(map[string]handler{http.MethodPost: s.stopSessionHTTP}))
 	mux.HandleFunc(core.SessionsPath+"/{id}/logs", s.logsHTTP)
+	mux.HandleFunc(core.SessionsPath+"/{id}/tty", s.ttyHTTP)
 	if !socket {
 		mux.HandleFunc(core.SessionReportsPath, s.methods(map[string]handler{http.MethodPost: s.reportHTTP}))
 	}
@@ -348,6 +354,62 @@ func (s *Server) logsHTTP(w http.ResponseWriter, r *http.Request) {
 	if !sw.started {
 		_, _ = sw.Write(nil)
 	}
+}
+
+// ttyHTTP attaches the caller to a session's terminal, on its node, over a
+// WebSocket (core.SessionTTYPath). A foreign origin is refused before
+// anything else; an error before the upgrade is the JSON error.
+func (s *Server) ttyHTTP(w http.ResponseWriter, r *http.Request) {
+	fail := func(err error) {
+		var ce *core.Error
+		if errors.As(err, &ce) && ce.Code != core.CodeInternal {
+			writeError(w, statusFor(ce.Code), ce)
+			return
+		}
+		s.log.Error("request failed", "method", r.Method, "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, core.NewError(core.CodeInternal, "internal error"))
+	}
+	if err := core.CheckOrigin(r.Header.Get("Origin"), r.Host); err != nil {
+		s.log.Warn("terminal upgrade refused: foreign origin", "path", r.URL.Path, "origin", r.Header.Get("Origin"))
+		fail(err)
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		writeError(w, http.StatusMethodNotAllowed, core.NewError(core.CodeInvalidArgument, "method "+r.Method+" not allowed"))
+		return
+	}
+	id, err := core.ParseSessionID(r.PathValue("id"))
+	if err != nil {
+		fail(err)
+		return
+	}
+	row, err := s.st.GetSession(r.Context(), id)
+	if err != nil {
+		fail(err)
+		return
+	}
+	_, ns, err := s.routeID(r.Context(), row.NodeID)
+	if err != nil {
+		fail(err)
+		return
+	}
+	term, err := ns.AttachSession(r.Context(), id)
+	if err != nil {
+		var ce *core.Error
+		if !errors.As(err, &ce) {
+			err = (&core.Error{
+				Code:    core.CodeUnavailable,
+				Message: fmt.Sprintf("the session's node cannot be reached: %v", err),
+				Details: map[string]string{"id": id.String()},
+			}).WithReason(core.ExitNodeUnavailable)
+		}
+		fail(err)
+		return
+	}
+	s.log.Info("terminal attached", "id", id.String(), "mode", string(term.Mode()))
+	tty.Serve(w, r, term, s.log)
+	s.log.Info("terminal detached", "id", id.String())
 }
 
 // streamWriter writes a raw byte stream as the response: the headers on

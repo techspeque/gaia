@@ -154,9 +154,11 @@ func (m markWrites) Write(p []byte) (int, error) {
 }
 
 // runUsage is the usage text of `gaia run`.
-const runUsage = `usage: gaia run --node NODE --detach [--profile PROFILE] -- ARGV...
-  Starts ARGV on NODE, under the node user's environment, and prints the
-  session id. --detach returns at once; the session runs on.`
+const runUsage = `usage: gaia run --node NODE (--detach | --interactive) [--profile PROFILE] -- ARGV...
+  Starts ARGV on NODE, under the node user's environment. --detach prints
+  the session id and returns at once; the session runs on. --interactive
+  gives ARGV a terminal and attaches to it, as gaia attach does: Ctrl-]
+  detaches, and the session runs on.`
 
 // Run runs `gaia run` and returns the exit code.
 func Run(args []string, env Env) int {
@@ -177,6 +179,7 @@ func Run(args []string, env Env) int {
 	fs.Usage = func() {}
 	nodeName := fs.String("node", "", "")
 	detach := fs.Bool("detach", false, "")
+	interactive := fs.Bool("interactive", false, "")
 	profile := fs.String("profile", "", "")
 	if err := fs.Parse(flags); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -190,14 +193,20 @@ func Run(args []string, env Env) int {
 		return usage(fmt.Sprintf("unexpected argument %q: put the agent's argv after --", fs.Arg(0)))
 	case *nodeName == "":
 		return usage("--node NODE is required")
-	case !*detach:
-		return usage("--detach is required (--wait and --interactive are not available yet)")
+	case *detach && *interactive:
+		return usage("--detach and --interactive cannot be combined")
+	case !*detach && !*interactive:
+		return usage("--detach or --interactive is required (--wait is not available yet)")
 	case i < 0:
 		return usage("put the agent's argv after --")
 	case len(argv) == 0:
 		return usage("nothing to run: argv after -- is empty")
 	}
-	req := core.StartSessionRequest{Node: *nodeName, Mode: core.SessionHeadless, Argv: argv, Profile: *profile}
+	mode := core.SessionHeadless
+	if *interactive {
+		mode = core.SessionInteractive
+	}
+	req := core.StartSessionRequest{Node: *nodeName, Mode: mode, Argv: argv, Profile: *profile}
 	if err := req.Validate(); err != nil {
 		var ce *core.Error
 		errors.As(err, &ce)
@@ -206,6 +215,9 @@ func Run(args []string, env Env) int {
 	sess, err := env.Client.StartSession(context.Background(), req)
 	if err != nil {
 		return env.Client.Fail(env.Stderr, err)
+	}
+	if *interactive {
+		return attach(context.Background(), sess.ID, env)
 	}
 	fmt.Fprintln(env.Stdout, sess.ID)
 	return 0

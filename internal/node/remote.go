@@ -356,8 +356,26 @@ func (t *recoveringTransport) RoundTrip(req *http.Request) (*http.Response, erro
 		return nil, &recoveringError{state: t.link.State(), wait: t.wait, err: err}
 	}
 	// Headers arrived in time: the body streams for as long as it takes.
+	if rwc, ok := res.Body.(io.ReadWriteCloser); ok && res.StatusCode == http.StatusSwitchingProtocols {
+		// An upgraded connection (a terminal WebSocket): the proxy needs to
+		// write to it as well.
+		res.Body = &cancelOnCloseRW{ReadWriteCloser: rwc, cancel: cancel}
+		return res, nil
+	}
 	res.Body = &cancelOnClose{ReadCloser: res.Body, cancel: cancel}
 	return res, nil
+}
+
+// cancelOnCloseRW is cancelOnClose for an upgraded connection.
+type cancelOnCloseRW struct {
+	io.ReadWriteCloser
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnCloseRW) Close() error {
+	err := c.ReadWriteCloser.Close()
+	c.cancel()
+	return err
 }
 
 // cancelOnClose releases a request's context when its body is closed.
