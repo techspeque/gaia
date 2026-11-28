@@ -1,22 +1,5 @@
 version: 1
 slices:
-    - id: fix-0003
-      title: 'On a machine already on the tailnet, Gaia''s devices get suffixed tailnet names, so README''s --host and node: steps fail'
-      type: fix
-      priority: p0
-      risk: medium
-      coder: claude-code/opus-5-5
-      reviewer: codex/gpt-6-astra
-      plan: .metis/plans/phase-0-plan.md
-      plan_section: 'Workstream 0.7: Node role, registration and heartbeat'
-      coded: true
-      reviewed: true
-      review_cycles: 1
-      notes: |-
-        Found by phase-0-gate run 1 (v0.0.1, see .metis/briefs/phase-0-gate.md, Findings). Both gate hosts already run the system Tailscale client under their machine name. gaia host asks the control server for the machine name and is given MACHINE-1; gaia node (default --name = machine name) is given MACHINE-1 too. Effects: (1) gaia node --host <host machine name>, as README shows, resolves to the machine's own Tailscale device, not Gaia's, and retries 'connection was refused' forever with no hint; (2) --allow node:<node's --name>, as README suggests, is refused 403 because the peer's tailnet name is the suffixed one, while the registry name stays unsuffixed: README's 'name in the registry and on the tailnet' is false here; (3) Gaia never prints the tailnet name it was given (host and node log only the address), so the names needed for --host and node: can only be found from another device or the admin console, and the host's allowlist can only be completed after the node has joined, with a host restart. ADR-0004 promises a stable name from --join. Required: the documented README steps for host and node work, unedited, on machines that already run Tailscale; each daemon reports the tailnet name it was given (log and/or a command); README states exactly which name --host and node: take. How (a --name for the host, a distinct default such as a gaia- prefix, a hint when --host resolves to a device with nothing on 443, matching node: on another field) is the Coder's design within ADR-0004; node: must stay bound to a control-server-asserted name, never to the self-claimed registry name. Then a release carrying the fix, and the gate re-runs from scenario 2.
-
-        Decided by the Human on 2026-11-28, as the way to stop the collision: (a) the default tailnet name a Gaia daemon asks for is gaia-<machine name>, for host and node alike, so it does not collide with the machine's own Tailscale device; (b) gaia host gains --name, as gaia node has, and gaia service install passes it through; (c) the registry name and the tailnet name stay one name, and when the control server still assigns a different name (a suffix), the daemon logs the assigned name at start, reports it in gaia nodes, and node: allowlist entries match the assigned name. README, the fixtures and the launcher contract examples follow. Existing state directories joined under an old name keep working and keep their name; say in README how to re-join under the new one.
-      created: "2026-11-27"
     - id: phase-0-gate
       title: 'Phase 0 gate: composed-system validation'
       type: gate
