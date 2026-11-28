@@ -182,3 +182,10 @@ findings:
       category: ""
       finding: 'Gate run 2 (v0.0.2) reproduces f-012 twice, so it is not a one-off: after the node had been down 40-45 s (process or user service) and started again, it registered at once, then the next heartbeat and forwarded request timed out. Under the service: gaia nodes on the node 1 s after start exit 90 (no daemon yet), at 11 s exit 99 after 10,020 ms (''context deadline exceeded''), at 16 s 4,060 ms, from 17 s on 14-15 ms. Node log: ''heartbeat failed; registering again'' 15 s after the first registration. Not seen on an immediate restart (run 1). Steady-state gaia nodes on the node is 9-10 ms.'
       status: advisory
+    - id: f-018
+      date: "2026-11-28"
+      slice: phase-0-gate
+      severity: P3
+      category: ""
+      finding: 'Gate run 2 (v0.0.2): a node whose --host still names a v0.0.1-era host device that is now offline (the stale <machine>-1 device) retries ''context deadline exceeded'' with no hint; the new refused-port hint (fix-0003) covers only a reachable device with nothing on 443. A unit written by v0.0.1 with the old --host would hit this after the host is moved to its gaia- name; README''s migration text says nodes then use the new name, which is enough if read.'
+      status: advisory
