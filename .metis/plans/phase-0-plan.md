@@ -334,6 +334,6 @@ Composition scenarios to validate:
 - [ ] Both daemons run under the unit written by `gaia service install`, with no root, and are up after a reboot; `gaia service uninstall` leaves the state directory in place
 
 Performance / resource checks:
-- [ ] `gaia nodes` completes in under 100 ms on the host and under 500 ms on a node
+- [ ] `gaia nodes` completes in under 100 ms on the host and under 500 ms on a node at steady state. After a node or the host returns from an outage, recovery may take up to 30 s: within that time `gaia nodes` on the node answers within the limit again (Human, 2026-11-28)
 - [ ] Idle resident memory of host and node is measured on the gate machines and recorded in the README
 - [ ] Release binary size is recorded in the README
