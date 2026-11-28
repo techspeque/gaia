@@ -29,7 +29,12 @@ var (
 // other.
 func isForbiddenArgv(argv []string) bool {
 	sub := ""
-	for _, a := range argv {
+	for i := 0; i < len(argv); i++ {
+		a := argv[i]
+		if sub == "" && a == "-c" {
+			i++
+			continue
+		}
 		if strings.HasPrefix(a, "--git-dir=") || strings.HasPrefix(a, "--work-tree=") {
 			continue
 		}
@@ -448,6 +453,110 @@ func TestPrepareBranchNotFound(t *testing.T) {
 	wantSync(t, err, StageBefore, ReasonBranchNotFound)
 	if after := snapshot(t, c.Dir()); after != before {
 		t.Fatalf("checkout changed:\n%s\n---\n%s", before, after)
+	}
+}
+
+// failingCheckoutHooks installs post-checkout and post-merge hooks in the
+// checkout that touch a marker file and exit 1. Each runs after git has changed the checkout, so a failure they
+// cause cannot leave the checkout as it was.
+func failingCheckoutHooks(t *testing.T, dir string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell hooks need a POSIX shell")
+	}
+	marker := filepath.Join(t.TempDir(), "hook-ran")
+	hook := "#!/bin/sh\ntouch '" + marker + "'\nexit 1\n"
+	for _, name := range []string{"post-checkout", "post-merge"} {
+		if err := os.WriteFile(filepath.Join(dir, ".git", "hooks", name), []byte(hook), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return marker
+}
+
+// A failing checkout hook can neither fail Prepare after the checkout has
+// changed nor run at all: the session starts at the remote tip.
+func TestPrepareIgnoresFailingCheckoutHooks(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		branch string
+		setup  func(t *testing.T, f *fixture, c *Checkout)
+	}{
+		{"remote only branch", "feature/x", func(t *testing.T, f *fixture, c *Checkout) {
+			gitT(t, f.caller, "switch", "--quiet", "-c", "feature/x")
+			commitFile(t, f.caller, "feat", "x\n")
+			gitT(t, f.caller, "push", "--quiet", "origin", "feature/x")
+		}},
+		{"switch and fast-forward", "main", func(t *testing.T, f *fixture, c *Checkout) {
+			gitT(t, c.Dir(), "switch", "--quiet", "--detach")
+			commitFile(t, f.caller, "next", "two\n")
+			gitT(t, f.caller, "push", "--quiet", "origin", "main")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			c := f.prepared(t, "main")
+			tc.setup(t, f, c)
+			marker := failingCheckoutHooks(t, c.Dir())
+			p, err := c.Prepare(context.Background(), tc.branch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := f.remoteTip(t, tc.branch); p.Head != want {
+				t.Fatalf("head %s, want %s", p.Head, want)
+			}
+			if got := gitT(t, c.Dir(), "symbolic-ref", "HEAD"); got != "refs/heads/"+tc.branch {
+				t.Fatalf("HEAD on %s, want %s", got, tc.branch)
+			}
+			if _, err := os.Stat(marker); err == nil {
+				t.Fatal("a checkout hook ran during Prepare")
+			}
+		})
+	}
+}
+
+// A switch or fast-forward that git refuses leaves HEAD, every local branch
+// and the work tree bytes as they were.
+func TestPrepareCheckoutFailureLeavesCheckout(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		branch string
+		reason Reason
+		setup  func(t *testing.T, f *fixture, c *Checkout)
+	}{
+		{"remote only branch", "feature/x", ReasonCheckoutFailed, func(t *testing.T, f *fixture, c *Checkout) {
+			gitT(t, f.caller, "switch", "--quiet", "-c", "feature/x")
+			commitFile(t, f.caller, "feat", "x\n")
+			gitT(t, f.caller, "push", "--quiet", "origin", "feature/x")
+		}},
+		{"existing branch", "main", ReasonCheckoutFailed, func(t *testing.T, f *fixture, c *Checkout) {
+			gitT(t, c.Dir(), "switch", "--quiet", "--detach", "HEAD")
+			commitFile(t, c.Dir(), "detached", "d\n")
+			commitFile(t, f.caller, "next", "two\n")
+			gitT(t, f.caller, "push", "--quiet", "origin", "main")
+		}},
+		{"fast-forward", "main", ReasonFastForwardFailed, func(t *testing.T, f *fixture, c *Checkout) {
+			commitFile(t, f.caller, "next", "two\n")
+			gitT(t, f.caller, "push", "--quiet", "origin", "main")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			c := f.prepared(t, "main")
+			tc.setup(t, f, c)
+			failingCheckoutHooks(t, c.Dir())
+			// A held index lock makes git refuse to update the work tree.
+			lock := filepath.Join(c.Dir(), ".git", "index.lock")
+			if err := os.WriteFile(lock, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			before := snapshot(t, c.Dir())
+			_, err := c.Prepare(context.Background(), tc.branch)
+			wantSync(t, err, StageBefore, tc.reason)
+			if after := snapshot(t, c.Dir()); after != before {
+				t.Fatalf("checkout changed:\n%s\n---\n%s", before, after)
+			}
+		})
 	}
 }
 

@@ -24,6 +24,12 @@ var forbiddenArgs = map[string]bool{
 	"--delete": true, "--prune": true,
 }
 
+// hooklessSubcommands run with hooks disabled. Their hooks (post-checkout,
+// post-merge, reference-transaction) run after git has changed the checkout,
+// so a failing one would fail the sync with HEAD, branches and files already
+// moved, which no permitted git operation can undo.
+var hooklessSubcommands = map[string]bool{"switch": true, "merge": true}
+
 // strippedEnv are variables that would point git at another repository than
 // the checkout it is run on.
 var strippedEnv = []string{
@@ -95,6 +101,9 @@ func git(ctx context.Context, dir, sub string, args ...string) (gitResult, error
 		return gitResult{exit: -1}, err
 	}
 	var argv []string
+	if hooklessSubcommands[sub] {
+		argv = append(argv, "-c", "core.hooksPath="+os.DevNull)
+	}
 	if dir != "" {
 		argv = append(argv, "--git-dir="+filepath.Join(dir, ".git"), "--work-tree="+dir)
 	}
