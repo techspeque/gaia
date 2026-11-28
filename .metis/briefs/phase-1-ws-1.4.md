@@ -174,4 +174,44 @@ None.
 
 ## Report
 
-Filled at implementation.
+- Added: `internal/core/nodeapi.go` (+test: node API wire types and paths,
+  `SessionReportsPath`, `DetailReason`/`DetailSessionState`,
+  `Error.WithReason`, `ExitCodeByName`, `ErrNotDelivered`,
+  `LogsQuery`/`ParseLogsQuery`); `internal/supervise/scrollback.go` (+test,
+  `OpenScrollback`); `internal/host/session.go` (+test: `NodeSessions`,
+  `NodeRouter`, session routes, `StartSession`, `StopSession`,
+  `ListSessions`, `GetSession`, `ReportSession`, logs streaming);
+  `internal/node/sessionapi.go` (+test: `LocalSessions`, `SessionHandler`,
+  `PeerCheck`, `SessionClient`, `StreamWriter`); `cmd/gaia/sessions.go`
+  (manager opening, `sessionRouter`, tailnet node clients,
+  `hostPeerCheck`), `cmd/gaia/sessions_test.go`;
+  `cmd/gaia/cli/sessions.go` (+test: `run`, `ls`, `stop`, `logs`).
+- Edited: `internal/host/host.go` (`Options.Nodes`, session routes, an
+  internal error keeps its `reason`, `statusRecorder.Unwrap` for flushing);
+  `internal/node/remote.go` (`Client.ReportSession`; the local socket
+  refuses the reports path) + `remote_test.go`; `cmd/gaia/daemon.go` and
+  `node.go` (manager wiring, node API on the node's tailnet listener);
+  `cmd/gaia/main.go` (dispatch, usage); `cmd/gaia/cli/client.go` (`send`
+  with a body and per-call timeout, exit code from `reason`);
+  `cmd/gaia/node_test.go` (node state may hold `sessions`).
+- Tests: every test in the test plan exists and passes, plus
+  `TestStartSessionReportFirst`, `TestSessionClientOutcomeUnknown`,
+  `TestNodeAPIUnknownPath`. `make verify`: green. `go test -race` on
+  host, node, supervise, cli: green. `TestSessions*` `-count=3`: green.
+  `GOOS=windows` and `GOOS=linux go vet ./...`: clean. Linux tests not run
+  locally (CI runs them).
+- Decisions:
+  - Rows are never deleted (1.1 trigger), so a start that cannot reach a
+    node the host believed online leaves a `failed` row; unknown and
+    offline nodes are refused before any row exists (brief amended before
+    code).
+  - `ReportSessionRequest` carries no node id: the host takes the node
+    from the caller's tailnet identity. A report from an allowlisted peer
+    not yet registered is `unavailable` (retried), so a node that reports
+    before registering loses nothing.
+  - A node's internal start error reaches the CLI as `unavailable` with
+    reason `start_failed`; its detail stays in the node's log.
+- Notes for later slices (outside this scope): anyone the host's
+  allowlist admits can start sessions on every node through the host API,
+  as the design has it; the systemd unit's `KillMode` follow-up from 1.3
+  still stands.

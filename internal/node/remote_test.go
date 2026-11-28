@@ -259,6 +259,8 @@ func TestHandler(t *testing.T) {
 		{http.MethodGet, core.VersionPath + "?x=1", ""},
 		{http.MethodDelete, core.NodePath("node-b"), ""},
 		{http.MethodPut, core.NodesPath, `{"a":1}`},
+		{http.MethodPost, core.SessionsPath, `{"node":"node-b"}`},
+		{http.MethodGet, core.SessionsPath + "/sess_x/logs?offset=3&follow=1", ""},
 	} {
 		rec := call(c.method, c.path, c.body)
 		if rec.Code != http.StatusTeapot || rec.Body.String() != `{"from":"host"}` {
@@ -276,6 +278,7 @@ func TestHandler(t *testing.T) {
 		{http.MethodPost, core.NodesPath},
 		{http.MethodPost, core.HeartbeatPath},
 		{http.MethodGet, core.HeartbeatPath},
+		{http.MethodPost, core.SessionReportsPath},
 		{http.MethodGet, "/"},
 		{http.MethodGet, "/api/v2/nodes"},
 	} {
@@ -563,5 +566,24 @@ func TestRequest(t *testing.T) {
 	r := Request("node-a", "v2")
 	if r.Name != "node-a" || r.TailnetIdentity != "" || r.APIVersion != core.APIVersion || r.GaiaVersion != "v2" {
 		t.Errorf("Request = %+v", r)
+	}
+}
+
+// TestClientReportSession: a report reaches a real host as the calling
+// peer's; before that peer registers, the host refuses it as retryable.
+func TestClientReportSession(t *testing.T) {
+	_, c := startHost(t, host.Options{})
+	ctx := context.Background()
+	r := core.SessionReport{SessionID: core.NewSessionID([16]byte{1}), Seq: 1, State: core.SessionRunning}
+	err := c.ReportSession(ctx, r)
+	if !errors.Is(err, core.NewError(core.CodeUnavailable, "")) || finalRefusal(err) {
+		t.Fatalf("report before registering: %v, want a retryable unavailable", err)
+	}
+	if _, err := c.Register(ctx, Request("node-a", "v1.2.3")); err != nil {
+		t.Fatal(err)
+	}
+	// Registered, but the host has no such session: a final refusal.
+	if err := c.ReportSession(ctx, r); !finalRefusal(err) {
+		t.Fatalf("report of an unknown session: %v, want a final refusal", err)
 	}
 }

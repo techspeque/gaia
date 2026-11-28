@@ -56,6 +56,9 @@ type Options struct {
 	// APIVersion is the API version this host speaks and reports. Nodes at
 	// it and one behind may register. Default: core.APIVersion.
 	APIVersion int
+	// Nodes reaches the nodes' sessions. Default: none, and every session
+	// start or stop is refused as node_unavailable.
+	Nodes NodeRouter
 }
 
 // Server is the host's registry and API.
@@ -179,6 +182,7 @@ func (s *Server) routes(socket bool) *http.ServeMux {
 	}
 	mux.HandleFunc(core.NodesPath, s.methods(nodes))
 	mux.HandleFunc(core.NodesPath+"/{name}", s.methods(map[string]handler{http.MethodDelete: s.removeHTTP}))
+	s.sessionRoutes(mux, socket)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, core.NewError(core.CodeNotFound, "no such endpoint"))
 	})
@@ -231,7 +235,12 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request, h handler) {
 		return
 	}
 	s.log.Error("request failed", "method", r.Method, "path", r.URL.Path, "err", err)
-	writeError(w, http.StatusInternalServerError, core.NewError(core.CodeInternal, "internal error"))
+	e := core.NewError(core.CodeInternal, "internal error")
+	if ce != nil && ce.Details[core.DetailReason] != "" {
+		// Which contract exit code fits is no detail of the failure.
+		e.Details = map[string]string{core.DetailReason: ce.Details[core.DetailReason]}
+	}
+	writeError(w, http.StatusInternalServerError, e)
 }
 
 // statusFor maps an error code to its HTTP status.
@@ -560,6 +569,9 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
 }
+
+// Unwrap lets http.ResponseController flush a streamed response.
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
 func (s *Server) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

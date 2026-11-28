@@ -43,6 +43,13 @@ const usage = `usage: gaia <command> [flags]
                                 the host; --name as for the host
   nodes [-o text|json]          list the machines registered with the host
   nodes remove NAME             remove a retired machine from the registry
+  run --node NODE --detach [--profile P] -- ARGV...
+                                start ARGV on NODE as a session and print
+                                its id; the session runs on
+  ls [-o text|json]             list the sessions the host knows
+  stop SESSION                  stop a session (SIGTERM, SIGKILL after 10s)
+  logs SESSION [-f|--follow]    print a session's output; --follow until
+                                the session ends
   service install (host [--node] [--tailnet ...] | node --host NAME)
                                 run the daemon as a user service (systemd
                                 user unit or launchd agent) and start it
@@ -71,6 +78,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runNode(args[1:], stderr, runtime.GOOS)
 	case "nodes":
 		return cli.Nodes(args[1:], cliEnv(stdout, stderr))
+	case "run":
+		return cli.Run(args[1:], cliEnv(stdout, stderr))
+	case "ls":
+		return cli.Ls(args[1:], cliEnv(stdout, stderr))
+	case "stop":
+		return cli.Stop(args[1:], cliEnv(stdout, stderr))
+	case "logs":
+		return cli.Logs(args[1:], cliEnv(stdout, stderr))
 	case "service":
 		return runService(args[1:], stdout, stderr, runtime.GOOS)
 	case "supervise":

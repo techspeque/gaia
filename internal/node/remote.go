@@ -81,6 +81,14 @@ func (c *Client) Heartbeat(ctx context.Context, req core.HeartbeatRequest) (core
 	return res, c.post(ctx, core.HeartbeatPath, req, &res)
 }
 
+// ReportSession sends a session report to the host: Client is a node
+// session manager's Reporter over the tailnet. The host knows the node by
+// its tailnet identity.
+func (c *Client) ReportSession(ctx context.Context, r core.SessionReport) error {
+	var res core.ReportSessionResponse
+	return c.post(ctx, core.SessionReportsPath, core.ReportSessionRequest{Report: r}, &res)
+}
+
 // post sends in as JSON to path and decodes a 2xx answer into out. A
 // non-2xx answer is the host's *core.Error.
 func (c *Client) post(ctx context.Context, path string, in, out any) error {
@@ -233,8 +241,8 @@ func sleep(ctx context.Context, d time.Duration) bool {
 
 // Handler is the API on a node's local socket: /healthz answered by the
 // node itself, every other /api/v1 request passed to forward (the host),
-// except the node's own registration and heartbeat, which no local process
-// may send in the node's name.
+// except the node's own registration, heartbeat and session reports, which
+// no local process may send in the node's name.
 func Handler(forward http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	notFound := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -251,6 +259,7 @@ func Handler(forward http.Handler) http.Handler {
 	})
 	mux.Handle("POST "+core.NodesPath, notFound)
 	mux.Handle(core.HeartbeatPath, notFound)
+	mux.Handle(core.SessionReportsPath, notFound)
 	mux.Handle(core.APIPrefix+"/", forward)
 	mux.Handle("/", notFound)
 	return mux

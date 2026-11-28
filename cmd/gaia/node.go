@@ -173,6 +173,20 @@ func nodeDaemon(cfg nodeConfig, log *slog.Logger) int {
 	})
 	defer transport.CloseIdleConnections()
 	base := &url.URL{Scheme: "https", Host: cfg.host}
+	hostClient := &node.Client{
+		HTTP:    &http.Client{Transport: transport, Timeout: hostRequestTimeout},
+		BaseURL: base.String(),
+	}
+
+	// Sessions first: those that outlived the last daemon are found again
+	// and reported once the host is reachable (ADR-0008 rule 4).
+	mgr, local, err := openSessions(ctx, cfg.state, hostClient, log)
+	if err != nil {
+		log.Error("cannot start the node's sessions", "err", err)
+		return 1
+	}
+	defer mgr.Close()
+	go mgr.Run(ctx)
 
 	served := make(chan error, 1)
 	go func() {
@@ -210,13 +224,25 @@ func nodeDaemon(cfg nodeConfig, log *slog.Logger) int {
 	log.Info("joined the tailnet", "tailnet_addr", t.Addr())
 	reportTailnetName(ctx, t, cfg.name, "node", log)
 
+	// The node API, for the host only: start, stop and read sessions.
+	tl, err := t.ListenTLS(tailnetPort)
+	if err != nil {
+		log.Error("cannot listen on the tailnet", "err", err)
+		cancel()
+		<-served
+		log.Info("node stopped", "exit_code", 1)
+		return 1
+	}
+	apiDone := make(chan error, 1)
+	go func() {
+		apiDone <- serveHTTP(ctx, tl, node.SessionHandler(local, hostPeerCheck(t, cfg.host), log), log)
+	}()
+	defer func() { <-apiDone }()
+
 	runDone := make(chan error, 1)
 	go func() {
 		err := node.Run(ctx, node.RunConfig{
-			Host: &node.Client{
-				HTTP:    &http.Client{Transport: transport, Timeout: hostRequestTimeout},
-				BaseURL: base.String(),
-			},
+			Host:    hostClient,
 			Request: node.Request(cfg.name, version),
 			Link:    link,
 			Logger:  log,
