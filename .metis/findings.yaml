@@ -342,6 +342,9 @@ findings:
       severity: P2
       category: behavior
       finding: cmd/gaia/cli/attach.go:176 — sessionEnded checks its five-second deadline only after GetSession returns, but passes the unbounded parent context; a delayed daemon response reproduced a 7.00-second wait and exit 7 instead of the brief-required fallback 0 after five seconds (the default request timeout is ten seconds). Bound the entire polling loop and each request with the endWait deadline, return the documented fallback when it expires, and add a delayed-response regression test.
-      status: open
+      status: resolved
+      resolved_by: commit 3a8f0cdd2cf4; test TestAttachSessionEndsSlowHost
       cycle: 1
       file: cmd/gaia/cli/attach.go
+      commit: 3a8f0cdd2cf435b7ae89910aea44ef43cc331b22
+      evidence: test TestAttachSessionEndsSlowHost
