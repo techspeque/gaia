@@ -144,4 +144,10 @@ None.
 
 ## Report
 
-Filled at implementation.
+- Files: `internal/repo/doc.go`, `error.go`, `name.go`, `git.go`,
+  `workspace.go`, `checkout.go`, `repo_test.go`.
+- `go test -race -count=3 ./internal/repo/`: ok.
+- Decisions beyond the design list: `--prune` is also refused by the guard
+  (it deletes remote-tracking refs); branches containing `:` or starting
+  with `+` are refused before `check-ref-format`; `http(s)` URLs with any
+  user name are refused (the name may be a token).
