@@ -40,6 +40,10 @@ type NodeRouter interface {
 // period, SIGKILL, and the round trip.
 const stopTimeout = 30 * time.Second
 
+// recordTimeout bounds recording the outcome of a start the node was
+// asked for, which outlives the caller's cancellation.
+const recordTimeout = 10 * time.Second
+
 // sessionRoutes adds the session API to mux. Reports from nodes on the
 // tailnet are on the tailnet mux only.
 func (s *Server) sessionRoutes(mux *http.ServeMux, socket bool) {
@@ -197,8 +201,12 @@ func (s *Server) StartSession(ctx context.Context, req core.StartSessionRequest)
 }
 
 // startFailed records what a failed start on node n means for the session
-// with id, and returns the error for the caller.
+// with id, and returns the error for the caller. The record is made even
+// when ctx was canceled: the node was asked, so the row must not stay
+// starting.
 func (s *Server) startFailed(ctx context.Context, id core.SessionID, n core.Node, err error) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
+	defer cancel()
 	var ce *core.Error
 	switch {
 	case errors.Is(err, core.ErrNotDelivered):

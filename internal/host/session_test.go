@@ -194,6 +194,39 @@ func TestStartSessionNodeFailures(t *testing.T) {
 	}
 }
 
+// A caller that cancels while the node is starting the session: the
+// outcome is still recorded, so the row does not stay starting.
+func TestStartSessionCanceledCaller(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		err    error
+		state  core.SessionState
+		reason string
+	}{
+		{"outcome unknown", context.Canceled, core.SessionLost, "session_lost"},
+		{"refused", core.NewError(core.CodeUnavailable, "no room"), core.SessionFailed, "start_failed"},
+		{"not delivered", fmt.Errorf("%w: %w", core.ErrNotDelivered, context.Canceled), core.SessionFailed, "node_unavailable"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s, _, f, _ := sessionServer(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			f.start = func(core.NodeStartRequest) (core.NodeSession, error) {
+				cancel()
+				return core.NodeSession{}, c.err
+			}
+			_, err := s.StartSession(ctx, startReq("node-a", "a"))
+			if reasonOf(err) != c.reason {
+				t.Errorf("error %v, reason %q, want %q", err, reasonOf(err), c.reason)
+			}
+			l := listAll(t, s)
+			if len(l) != 1 || l[0].State != c.state {
+				t.Fatalf("sessions %+v, want one %s", l, c.state)
+			}
+		})
+	}
+}
+
 // A node that reports the start before answering it: the answer changes
 // nothing.
 func TestStartSessionReportFirst(t *testing.T) {
