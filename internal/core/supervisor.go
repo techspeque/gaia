@@ -13,7 +13,10 @@ const SupervisorStateVersion = 1
 // writes it on start and again on exit. ExitCode, Signal and EndedAt are
 // unset while the child runs. Signal is the name of the signal that killed
 // the child ("SIGKILL"), "" when it exited by itself. It holds no secret:
-// never the environment.
+// never the environment. ScrollbackEnd is the logical length of the
+// scrollback, every byte the session produced counted, kept or rotated out
+// (supervise.Spec.MaxScrollback); it is written on exit and 0 while the
+// child runs.
 type SupervisorState struct {
 	Version   int         `json:"version"`
 	SessionID SessionID   `json:"session_id"`
@@ -24,6 +27,8 @@ type SupervisorState struct {
 	ExitCode  *int        `json:"exit_code"`
 	Signal    string      `json:"signal"`
 	EndedAt   *time.Time  `json:"ended_at"`
+
+	ScrollbackEnd int64 `json:"scrollback_end"`
 }
 
 // Ended reports whether the state records the child's end.
@@ -56,9 +61,12 @@ func (s SupervisorState) Validate() error {
 	if err := ValidArgv(s.Argv); err != nil {
 		return bad(err.Error())
 	}
+	if s.ScrollbackEnd < 0 {
+		return bad("scrollback_end is negative")
+	}
 	if s.EndedAt == nil {
-		if s.ExitCode != nil || s.Signal != "" {
-			return bad("exit code or signal without ended_at")
+		if s.ExitCode != nil || s.Signal != "" || s.ScrollbackEnd != 0 {
+			return bad("exit code, signal or scrollback_end without ended_at")
 		}
 		return nil
 	}

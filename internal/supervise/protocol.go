@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -43,8 +42,12 @@ type Request struct {
 // Status is a supervisor's view of its session.
 type Status struct {
 	State core.SupervisorState `json:"state"`
-	// Size is the scrollback length in bytes.
+	// Size is the scrollback's logical length in bytes: every byte the
+	// session produced, kept or rotated out.
 	Size int64 `json:"size"`
+	// Start is the first scrollback offset still kept; 0 until a bounded
+	// scrollback rotates. A stream from before it is refused.
+	Start int64 `json:"start"`
 	// Stopping is true once a stop has been requested.
 	Stopping bool `json:"stopping"`
 }
@@ -180,7 +183,9 @@ var ErrStreamCut = errors.New("supervisor stream ended before the session's outp
 //
 // The stream carries raw bytes and the supervisor closes it at the end, so
 // on EOF the session directory tells a complete stream from a cut one: the
-// state file records the end, and the scrollback ends at offset+n.
+// state file records the end, and a scrollback length of offset+n. A
+// stream overtaken by the rotation of a bounded scrollback is cut; resuming
+// from before Status.Start is refused.
 func (c *Client) Stream(ctx context.Context, offset int64, w io.Writer) (n int64, err error) {
 	conn, r, _, err := c.call(ctx, Request{Op: OpStream, Offset: offset})
 	if err != nil {
@@ -223,12 +228,8 @@ func (c *Client) streamEnd(ctx context.Context, end int64) error {
 	if !st.Ended() {
 		return fmt.Errorf("%w: the connection closed while the session runs", ErrStreamCut)
 	}
-	fi, err := os.Stat(filepath.Join(dir, ScrollbackFile))
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrStreamCut, err)
-	}
-	if fi.Size() != end {
-		return fmt.Errorf("%w: got the scrollback to byte %d of %d", ErrStreamCut, end, fi.Size())
+	if st.ScrollbackEnd != end {
+		return fmt.Errorf("%w: got the scrollback to byte %d of %d", ErrStreamCut, end, st.ScrollbackEnd)
 	}
 	return nil
 }

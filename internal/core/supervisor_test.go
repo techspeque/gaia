@@ -25,18 +25,18 @@ func TestSupervisorStateShape(t *testing.T) {
 	ended := run
 	code := 3
 	end := run.StartedAt.Add(time.Minute)
-	ended.ExitCode, ended.EndedAt = &code, &end
+	ended.ExitCode, ended.EndedAt, ended.ScrollbackEnd = &code, &end, 1234
 	killed := run
-	killed.Signal, killed.EndedAt = "SIGKILL", &end
+	killed.Signal, killed.EndedAt, killed.ScrollbackEnd = "SIGKILL", &end, 1234
 
 	id := run.SessionID.String()
 	for _, c := range []struct {
 		s    SupervisorState
 		want string
 	}{
-		{run, `{"version":1,"session_id":"` + id + `","pid":4242,"mode":"interactive","argv":["claude","","line\nbreak \"q\""],"started_at":"2026-11-27T14:00:00.000000005Z","exit_code":null,"signal":"","ended_at":null}`},
-		{ended, `{"version":1,"session_id":"` + id + `","pid":4242,"mode":"interactive","argv":["claude","","line\nbreak \"q\""],"started_at":"2026-11-27T14:00:00.000000005Z","exit_code":3,"signal":"","ended_at":"2026-11-27T14:01:00.000000005Z"}`},
-		{killed, `{"version":1,"session_id":"` + id + `","pid":4242,"mode":"interactive","argv":["claude","","line\nbreak \"q\""],"started_at":"2026-11-27T14:00:00.000000005Z","exit_code":null,"signal":"SIGKILL","ended_at":"2026-11-27T14:01:00.000000005Z"}`},
+		{run, `{"version":1,"session_id":"` + id + `","pid":4242,"mode":"interactive","argv":["claude","","line\nbreak \"q\""],"started_at":"2026-11-27T14:00:00.000000005Z","exit_code":null,"signal":"","ended_at":null,"scrollback_end":0}`},
+		{ended, `{"version":1,"session_id":"` + id + `","pid":4242,"mode":"interactive","argv":["claude","","line\nbreak \"q\""],"started_at":"2026-11-27T14:00:00.000000005Z","exit_code":3,"signal":"","ended_at":"2026-11-27T14:01:00.000000005Z","scrollback_end":1234}`},
+		{killed, `{"version":1,"session_id":"` + id + `","pid":4242,"mode":"interactive","argv":["claude","","line\nbreak \"q\""],"started_at":"2026-11-27T14:00:00.000000005Z","exit_code":null,"signal":"SIGKILL","ended_at":"2026-11-27T14:01:00.000000005Z","scrollback_end":1234}`},
 	} {
 		if err := c.s.Validate(); err != nil {
 			t.Fatalf("Validate: %v", err)
@@ -80,6 +80,8 @@ func TestSupervisorStateValidate(t *testing.T) {
 		"ended, no outcome":    func(s *SupervisorState) { s.EndedAt = &after },
 		"ended before start":   func(s *SupervisorState) { s.EndedAt, s.ExitCode = &before, &code },
 		"ended zero":           func(s *SupervisorState) { s.EndedAt, s.ExitCode = &zero, &code },
+		"scrollback negative":  func(s *SupervisorState) { s.EndedAt, s.ExitCode, s.ScrollbackEnd = &after, &code, -1 },
+		"scrollback running":   func(s *SupervisorState) { s.ScrollbackEnd = 5 },
 	} {
 		s := runningState()
 		mut(&s)

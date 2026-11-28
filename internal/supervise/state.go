@@ -17,6 +17,9 @@ const (
 	StateFile      = "state.json"
 	ScrollbackFile = "scrollback"
 	SocketFile     = "sock"
+	// ScrollbackPrevFile holds the scrollback bytes just before those in
+	// ScrollbackFile, once a bounded scrollback has rotated.
+	ScrollbackPrevFile = "scrollback.prev"
 )
 
 // WriteState validates st and replaces dir's state file with it atomically:

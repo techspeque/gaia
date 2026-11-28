@@ -107,13 +107,19 @@ type supervisor struct {
 	red    *Redactor
 	stderr io.Writer
 
-	mu        sync.Mutex
-	state     core.SupervisorState
-	size      int64
-	outClosed bool
-	ended     bool
-	stopping  bool
-	notify    chan struct{} // closed and replaced on every change
+	mu    sync.Mutex
+	state core.SupervisorState
+	// size is the scrollback's logical length; curBase the offset of the
+	// first byte in ScrollbackFile; start the first offset kept, in
+	// ScrollbackPrevFile when start < curBase. curR and prevR read those
+	// files (prevR nil before the first rotation).
+	size, curBase, start int64
+	curR, prevR          *os.File
+	scrollBroken         bool // a rotation failed; output is no longer recorded
+	outClosed            bool
+	ended                bool
+	stopping             bool
+	notify               chan struct{} // closed and replaced on every change
 
 	inMu     sync.Mutex
 	inClosed bool
@@ -163,6 +169,11 @@ func prepare(dir string, spec Spec, stderr io.Writer) (_ *supervisor, err error)
 		return nil, err
 	}
 	cleanup = append(cleanup, func() { _ = scroll.Close(); _ = os.Remove(scrollPath) })
+	curR, err := os.Open(scrollPath)
+	if err != nil {
+		return nil, err
+	}
+	cleanup = append(cleanup, func() { _ = curR.Close() })
 	ln, err := listen(sockPath)
 	if err != nil {
 		return nil, err
@@ -193,6 +204,7 @@ func prepare(dir string, spec Spec, stderr io.Writer) (_ *supervisor, err error)
 		child:     c,
 		ln:        ln,
 		scroll:    scroll,
+		curR:      curR,
 		red:       NewRedactor(spec.Secrets),
 		stderr:    stderr,
 		state:     st,
@@ -326,6 +338,13 @@ func (s *supervisor) run(sigs chan os.Signal) int {
 	case <-done:
 	case <-time.After(closeTimeout):
 	}
+	s.mu.Lock()
+	for _, f := range []*os.File{s.curR, s.prevR} {
+		if f != nil {
+			_ = f.Close()
+		}
+	}
+	s.mu.Unlock()
 	return exit
 }
 
@@ -357,15 +376,88 @@ func (s *supervisor) appendOutput(redact func([]byte) []byte, p []byte) {
 		return
 	}
 	b := redact(p)
-	if len(b) == 0 {
+	if len(b) == 0 || s.scrollBroken {
 		return
 	}
-	n, err := s.scroll.Write(b)
-	s.size += int64(n)
-	if err != nil {
-		s.logf("writing the scrollback: %v", err)
-	}
+	s.writeScrollback(b)
 	s.broadcast()
+}
+
+// writeScrollback appends b to the scrollback, rotating a bounded one
+// whenever ScrollbackFile is full. Callers hold mu.
+func (s *supervisor) writeScrollback(b []byte) {
+	seg := s.spec.segment()
+	for len(b) > 0 {
+		k := int64(len(b))
+		if seg > 0 {
+			room := seg - (s.size - s.curBase)
+			if room <= 0 {
+				if err := s.rotate(); err != nil {
+					s.scrollBroken = true
+					s.logf("rotating the scrollback: %v; output is no longer recorded", err)
+					return
+				}
+				continue
+			}
+			k = min(k, room)
+		}
+		n, err := s.scroll.Write(b[:k])
+		s.size += int64(n)
+		if err != nil {
+			s.logf("writing the scrollback: %v", err)
+			return
+		}
+		b = b[k:]
+	}
+}
+
+// rotate makes the full ScrollbackFile the ScrollbackPrevFile, replacing
+// the older one, and starts an empty ScrollbackFile. Callers hold mu.
+func (s *supervisor) rotate() error {
+	cur := filepath.Join(s.dir, ScrollbackFile)
+	if err := s.scroll.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(cur, filepath.Join(s.dir, ScrollbackPrevFile)); err != nil {
+		return err
+	}
+	w, err := os.OpenFile(cur, os.O_WRONLY|os.O_CREATE|os.O_EXCL|os.O_APPEND|oNoFollow, 0o600)
+	if err != nil {
+		return err
+	}
+	r, err := os.Open(cur)
+	if err != nil {
+		_ = w.Close()
+		return err
+	}
+	if s.prevR != nil {
+		_ = s.prevR.Close()
+	}
+	s.scroll, s.prevR, s.curR = w, s.curR, r
+	s.start, s.curBase = s.curBase, s.size
+	return nil
+}
+
+// errDropped is a scrollback read before the first byte still kept.
+var errDropped = errors.New("the scrollback at this offset was rotated out")
+
+// readAt reads scrollback bytes from logical offset off into p, at most up
+// to the end of the file holding off.
+func (s *supervisor) readAt(p []byte, off int64) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if off < s.start {
+		return 0, errDropped
+	}
+	f, base, end := s.curR, s.curBase, s.size
+	if off < s.curBase {
+		f, base, end = s.prevR, s.start, s.curBase
+	}
+	n := min(int64(len(p)), end-off)
+	if n <= 0 {
+		return 0, io.EOF
+	}
+	return f.ReadAt(p[:n], off-base)
 }
 
 // finishOutput writes the redactor's held tail and closes the scrollback
@@ -397,6 +489,9 @@ func (s *supervisor) finishState(code *int, sig string) error {
 		ended = st.StartedAt
 	}
 	st.ExitCode, st.Signal, st.EndedAt = code, sig, &ended
+	s.mu.Lock()
+	st.ScrollbackEnd = s.size // the output is closed: size is final
+	s.mu.Unlock()
 	err := WriteState(s.dir, st)
 	s.mu.Lock()
 	s.state = st
@@ -441,7 +536,7 @@ func (s *supervisor) stop() {
 func (s *supervisor) status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return Status{State: s.state, Size: s.size, Stopping: s.stopping}
+	return Status{State: s.state, Size: s.size, Start: s.start, Stopping: s.stopping}
 }
 
 func (s *supervisor) serve(conns *sync.WaitGroup, done chan<- struct{}) {
@@ -545,22 +640,20 @@ func (s *supervisor) resize(rows, cols uint16) error {
 // ended and every byte is sent.
 func (s *supervisor) stream(conn net.Conn, offset int64) {
 	s.mu.Lock()
-	size := s.size
+	start, size := s.start, s.size
 	s.mu.Unlock()
-	if offset < 0 || offset > size {
+	if offset < start || offset > size {
+		what := "outside the scrollback"
+		if offset >= 0 && offset < start {
+			what = "rotated out of the scrollback"
+		}
 		_ = writeLine(conn, Response{Error: &core.Error{
 			Code:    core.CodeInvalidArgument,
-			Message: fmt.Sprintf("offset %d is outside the scrollback (0 to %d)", offset, size),
-			Details: map[string]string{"offset": fmt.Sprint(offset), "size": fmt.Sprint(size)},
+			Message: fmt.Sprintf("offset %d is %s (%d to %d)", offset, what, start, size),
+			Details: map[string]string{"offset": fmt.Sprint(offset), "start": fmt.Sprint(start), "size": fmt.Sprint(size)},
 		}})
 		return
 	}
-	f, err := os.Open(filepath.Join(s.dir, ScrollbackFile))
-	if err != nil {
-		_ = writeLine(conn, Response{Error: core.NewError(core.CodeInternal, "opening the scrollback: "+err.Error())})
-		return
-	}
-	defer f.Close()
 	if err := writeLine(conn, streamHeader{OK: true, Offset: offset}); err != nil {
 		return
 	}
@@ -570,13 +663,17 @@ func (s *supervisor) stream(conn net.Conn, offset int64) {
 		size, ended, changed := s.size, s.ended, s.notify
 		s.mu.Unlock()
 		for offset < size {
-			n := min(int64(maxChunk), size-offset)
-			m, err := f.ReadAt(buf[:n], offset)
+			m, err := s.readAt(buf, offset)
 			if m > 0 {
 				if _, werr := conn.Write(buf[:m]); werr != nil {
 					return
 				}
 				offset += int64(m)
+			}
+			if errors.Is(err, errDropped) {
+				// Overtaken by rotation: cut the stream, so the client
+				// sees it did not get everything.
+				return
 			}
 			if err != nil && m == 0 {
 				s.logf("reading the scrollback at %d: %v", offset, err)

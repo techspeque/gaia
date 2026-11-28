@@ -8,8 +8,16 @@
 // A supervisor lives in its session directory:
 //
 //	state.json  the core.SupervisorState, rewritten atomically on start and on exit
-//	scrollback  the agent's output, redacted, append-only
-//	sock        the unix socket, mode 0600, removed on exit
+//	scrollback       the agent's output, redacted, append-only
+//	scrollback.prev  the output before scrollback, once a bounded scrollback rotated
+//	sock             the unix socket, mode 0600, removed on exit
+//
+// Scrollback offsets count every byte since the session's first, kept or
+// rotated out. With Spec.MaxScrollback set, the two scrollback files hold
+// at most that many bytes together: when scrollback reaches half of it, it
+// becomes scrollback.prev (replacing the older one) and a new scrollback
+// starts. Status.Start is then the first offset still kept, and
+// core.SupervisorState.ScrollbackEnd records the logical length on exit.
 //
 // The session's spec (argv, environment, secrets) arrives on stdin and is
 // never written to disk, to argv or to a log.

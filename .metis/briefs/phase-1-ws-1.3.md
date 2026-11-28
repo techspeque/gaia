@@ -163,4 +163,41 @@ None.
 
 ## Report
 
-Filled at implementation.
+- Added: `internal/node/session.go` (`Manager`, `OpenManager`, `Start`,
+  `Stop`, `List`, `Get`, `SessionDir`, `Run`, `Close`, `Reporter`,
+  `StartSpec`, `SessionInfo`), `session_unix.go`, `session_other.go`,
+  `session_test.go`; `internal/core/report.go` (+test). Edited:
+  `internal/core/supervisor.go` (+test; `scrollback_end`),
+  `internal/supervise/` (`spec.go` `MaxScrollback`; `supervisor.go`
+  two-segment rotation, `readAt`, `Status.Start`, `scrollback_end` on exit;
+  `protocol.go` `Status.Start`, `streamEnd` checks `scrollback_end`;
+  `state.go` `ScrollbackPrevFile`; `doc.go`), new
+  `internal/supervise/rotate_test.go` (the rotation test lives there, not
+  in `supervise_test.go` as the test plan said; same package).
+- Tests: all listed in the test plan exist and pass, plus
+  `TestOpenManagerRefusesBadConfig`, `TestSessionReportShape`,
+  `TestSpecMaxScrollbackValidated`. `go test -race -count=3
+  ./internal/node/ ./internal/supervise/`: green. `make fmt-check vet
+  staticcheck`: clean. `GOOS=windows go vet` and `GOOS=linux go vet` on the
+  touched packages: clean. Linux tests not run locally (CI runs them).
+- Decisions:
+  - The spec is written to the supervisor's stdin in full (pipe, 30 s
+    deadline) before the "spawned" step; a daemon that dies earlier leaves
+    a supervisor that refuses and no agent, so the session ends `failed`.
+    Found by `TestRestartAtEveryStep/spawned`.
+  - A new daemon completes a stop the previous one recorded but may not
+    have sent; otherwise a later natural exit would be classified
+    `stopped` without a stop.
+  - An end with neither exit code nor known signal is `failed` (an
+    `exited` session needs an exit code).
+  - The orphaned agent of a SIGKILLed supervisor is left running; the
+    plan asks only for `lost`.
+- Not wired into `gaia node` / `gaia host --node`: there is no host session
+  endpoint yet (1.4).
+- Follow-up for 1.4 or later (outside this scope): the systemd user unit
+  has the default `KillMode=control-group`, so `systemctl --user
+  stop/restart` would kill supervisors with the daemon; it needs
+  `KillMode=process` (launchd likewise `AbandonProcessGroup`). Supervisor
+  socket paths under the default macOS state dir are ~94 bytes; a very
+  long home path can exceed the 103-byte limit, which the supervisor
+  refuses with a clear error.

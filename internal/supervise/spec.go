@@ -39,7 +39,15 @@ type Spec struct {
 	Cols uint16 `json:"cols"`
 	// GraceMS is the stop grace period in milliseconds; 0 means DefaultGrace.
 	GraceMS int64 `json:"grace_ms"`
+	// MaxScrollback bounds the scrollback on disk, in bytes; 0 means no
+	// bound. The scrollback rotates in two files of MaxScrollback/2 bytes,
+	// ScrollbackFile (newest) and ScrollbackPrevFile, so the newest output
+	// is kept and offsets stay counted from the session's first byte.
+	MaxScrollback int64 `json:"max_scrollback"`
 }
+
+// minMaxScrollback is the smallest scrollback bound: two one-byte segments.
+const minMaxScrollback = 2
 
 // Format writes the session id and mode only, for every verb, so a Spec in
 // a log line never shows its environment or secrets.
@@ -65,6 +73,8 @@ func (s Spec) Validate() error {
 		return bad(fmt.Sprintf("work_dir %q is not an absolute path", s.WorkDir))
 	case s.GraceMS < 0:
 		return bad("grace_ms is negative")
+	case s.MaxScrollback < 0 || (s.MaxScrollback > 0 && s.MaxScrollback < minMaxScrollback):
+		return bad(fmt.Sprintf("max_scrollback %d is neither 0 (no bound) nor at least %d", s.MaxScrollback, minMaxScrollback))
 	}
 	if err := core.ValidArgv(s.Argv); err != nil {
 		return bad(err.Error())
@@ -78,6 +88,9 @@ func (s Spec) grace() time.Duration {
 	}
 	return time.Duration(s.GraceMS) * time.Millisecond
 }
+
+// segment is the most bytes one scrollback file holds, 0 for no bound.
+func (s Spec) segment() int64 { return s.MaxScrollback / 2 }
 
 func (s Spec) size() (rows, cols uint16) {
 	rows, cols = s.Rows, s.Cols
