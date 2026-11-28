@@ -145,9 +145,12 @@ findings:
       severity: P2
       category: behavior
       finding: 'cmd/gaia/node.go:242 — refusedHint matches "connection refused", but an actual tsnet dial to a peer with port 443 closed returns "connect tcp 100.64.0.1:443: connection was refused"; the required retry hint is absent (TestReviewActualTailnetRefusalHint reproduced against the local test tailnet). — Recognize the actual tsnet refusal and add a regression test using that error or a real closed tailnet port.'
-      status: open
+      status: resolved
+      resolved_by: commit 6d0e1097ec2e; test TestRefusedHint
       cycle: 1
       file: cmd/gaia/node.go
+      commit: 6d0e1097ec2edb661b145aa4fdd43ef2f9e939ae
+      evidence: test TestRefusedHint
     - id: f-015
       date: "2026-11-28"
       slice: fix-0003
