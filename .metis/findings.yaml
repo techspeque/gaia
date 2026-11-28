@@ -225,9 +225,12 @@ findings:
       severity: P1
       category: security
       finding: 'internal/supervise/supervisor.go:174 — State copies spec.Argv without redacting known secrets, exposing them in state.json and socket status despite brief line 122. Reproduced with argv [/bin/echo, REVIEW_SECRET_123] and that value in secrets: scrollback is redacted but state.json contains the plaintext. Redact known secrets in persisted/returned metadata without changing the executed argv, and add a regression covering state and status.'
-      status: open
+      status: resolved
+      resolved_by: commit 6db59cdb7dbb; test TestSecretInArgvRedactedInStateAndStatus
       cycle: 1
       file: internal/supervise/supervisor.go
+      commit: 6db59cdb7dbbcaff582e6dfb132a50636241792f
+      evidence: test TestSecretInArgvRedactedInStateAndStatus
     - id: f-021
       date: "2026-11-28"
       slice: phase-1-ws-1.2
