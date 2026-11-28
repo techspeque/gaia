@@ -348,3 +348,12 @@ findings:
       file: cmd/gaia/cli/attach.go
       commit: 3a8f0cdd2cf435b7ae89910aea44ef43cc331b22
       evidence: test TestAttachSessionEndsSlowHost
+    - id: f-031
+      date: "2026-11-28"
+      slice: phase-1-ws-1.6
+      severity: P2
+      category: correctness
+      finding: internal/repo/checkout.go:101-109 — A post-checkout hook that exits 1 makes Prepare return checkout_failed after git switch has changed HEAD, created the requested local branch and replaced work-tree files; reproduced with a remote-only feature branch and a post-checkout hook containing exit 1. This violates the promised unchanged checkout on failure. Make the switch/fast-forward failure path preserve the pre-call checkout without forbidden git operations and add a regression test asserting HEAD, local refs and work-tree bytes remain unchanged.
+      status: open
+      cycle: 1
+      file: internal/repo/checkout.go
