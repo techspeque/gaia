@@ -90,7 +90,8 @@ const streamRetryWait = 100 * time.Millisecond
 // errLimit ends a stream that has written what was asked.
 var errLimit = errors.New("limit reached")
 
-// limitWriter passes at most n bytes to w, then fails with errLimit.
+// limitWriter passes at most n bytes to w and fails with errLimit as soon
+// as the n-th byte is written.
 type limitWriter struct {
 	w io.Writer
 	n int64
@@ -100,13 +101,12 @@ func (l *limitWriter) Write(p []byte) (int, error) {
 	if l.n <= 0 {
 		return 0, errLimit
 	}
-	short := int64(len(p)) > l.n
-	if short {
+	if int64(len(p)) > l.n {
 		p = p[:l.n]
 	}
 	k, err := l.w.Write(p)
 	l.n -= int64(k)
-	if err == nil && short {
+	if err == nil && l.n <= 0 {
 		err = errLimit
 	}
 	return k, err

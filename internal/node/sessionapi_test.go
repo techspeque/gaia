@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/techspeque/gaia/internal/core"
 )
@@ -104,6 +105,32 @@ func TestNodeAPISessionLifecycle(t *testing.T) {
 	wantCode(t, c.SessionLogs(ctx, unknown, 0, false, &tail), core.CodeNotFound)
 	_, err = c.StartSession(ctx, core.NodeStartRequest{ID: newID(t), Mode: core.SessionHeadless})
 	wantCode(t, err, core.CodeInvalidArgument)
+}
+
+// A running agent that has gone quiet: logs without follow return what
+// exists at once instead of waiting for more output.
+func TestNodeAPILogsIdleRunningAgent(t *testing.T) {
+	m, c := nodeAPI(t, admitAll)
+	id := newID(t)
+	if _, err := c.StartSession(ctxT(t), core.NodeStartRequest{ID: id, Mode: core.SessionHeadless, Argv: []string{fakeAgent, "print:ready", "sleep:1h"}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = m.Stop(context.Background(), id) })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var out bytes.Buffer
+	for out.String() != "ready\n" {
+		out.Reset()
+		if err := c.SessionLogs(ctx, id, 0, false, &out); err != nil {
+			t.Fatalf("logs of an idle running agent: %q %v", out.String(), err)
+		}
+		if !strings.HasPrefix("ready\n", out.String()) {
+			t.Fatalf("logs %q", out.String())
+		}
+	}
+	if info, err := m.Get(id); err != nil || info.State != core.SessionRunning {
+		t.Errorf("session %+v %v, want running", info, err)
+	}
 }
 
 func TestNodeAPIRefusesOtherPeers(t *testing.T) {
