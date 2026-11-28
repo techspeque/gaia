@@ -78,6 +78,10 @@ func TestResolveName(t *testing.T) {
 		}, role: "node", want: "gaia-studio"},
 		{name: "node ignores a registry", setup: func(t *testing.T, dir string) { write(t, dir, "gaia.db", "") },
 			role: "node", want: "gaia-studio"},
+		// README's host migration: tsnet and name deleted, registry kept,
+		// restarted with --name gaia-<machine>.
+		{name: "host re-join keeps registry", setup: func(t *testing.T, dir string) { write(t, dir, "gaia.db", "") },
+			flag: "gaia-studio", role: "host", want: "gaia-studio"},
 		{name: "bad recorded name", setup: func(t *testing.T, dir string) { write(t, dir, nameFile, "Bad_Name\n") },
 			role: "host", err: "invalid node name"},
 	} {

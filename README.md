@@ -171,8 +171,11 @@ gaia node --host gaia-studio
   machine to its `gaia-` name: stop the daemon, remove the device from the
   tailnet (admin console, or `headscale nodes delete`), delete
   `<state>/tsnet` and `<state>/name`, and join again with an auth key
-  (`gaia node --host … --join`; for the host, start `gaia host --tailnet` with
-  `$GAIA_AUTHKEY` set). A re-joined node is a new tailnet identity and
+  (`gaia node --host … --join`; for the host, keep `<state>/gaia.db`, the
+  registry, and start `gaia host --tailnet --name gaia-<machine name>` with
+  `$GAIA_AUTHKEY` set: without `--name` the kept registry makes it ask for the
+  machine name again). The new name is recorded, so later starts need no
+  `--name`. A re-joined node is a new tailnet identity and
   registers as a new node: remove the old entry with
   `gaia nodes remove <old name>`. Nodes then use the host's new name in
   `--host`, and `node:` entries the nodes' new names.
