@@ -84,6 +84,7 @@ func TestParseServiceArgs(t *testing.T) {
 	}{
 		{[]string{"host"}, []string{"--state=/home/a/.local/state/gaia"}, false},
 		{[]string{"host", "--node", "--state", "rel"}, []string{"--state=" + filepath.Join(cwd, "rel"), "--node"}, false},
+		{[]string{"host", "--node", "--name", "gaia-desk"}, []string{"--state=/home/a/.local/state/gaia", "--name=gaia-desk", "--node"}, false},
 		{[]string{"host", "--tailnet", "--allow", "tag:ci", "--allow-file", allowFile, "--control-url", "https://hs",
 			"--heartbeat-interval", "2s", "--missed-heartbeats", "4"},
 			[]string{"--state=/home/a/.local/state/gaia", "--tailnet", "--control-url=https://hs", "--allow=tag:ci",
@@ -118,6 +119,7 @@ func TestParseServiceArgsRefused(t *testing.T) {
 		{[]string{"node", "--host", "h", "--auth-key-file", "/k"}, 2, "--auth-key-file is not accepted"},
 		{[]string{"node"}, 2, "--host NAME is required"},
 		{[]string{"node", "--host", "h", "--name", "bad name!"}, 2, "--name"},
+		{[]string{"host", "--name", "Bad_Name"}, 2, "--name: invalid node name"},
 		{[]string{"node", "--host", "h", "--node"}, 2, "not defined"},
 		{[]string{"host", "--allow", "tag:a"}, 2, "--allow needs --tailnet"},
 		{[]string{"host", "--tailnet"}, 1, "needs an allowlist"},

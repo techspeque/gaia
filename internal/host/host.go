@@ -281,20 +281,21 @@ func peerFrom(r *http.Request) (gnet.Peer, bool) {
 	return p, ok
 }
 
-// peerIdentity is the node identity of an admitted peer: its stable id.
-// The handlers that need it run only on the tailnet mux.
-func peerIdentity(r *http.Request) (string, error) {
+// peerIdentity is the admitted peer as the control server names it: its
+// stable id, the node identity, and its MagicDNS short name. The handlers
+// that need it run only on the tailnet mux.
+func peerIdentity(r *http.Request) (ident, tailnetName string, err error) {
 	p, ok := peerFrom(r)
 	if !ok || p.StableID == "" {
-		return "", core.NewError(core.CodeForbidden, "permission denied")
+		return "", "", core.NewError(core.CodeForbidden, "permission denied")
 	}
-	return p.StableID, nil
+	return p.StableID, p.NodeName, nil
 }
 
-// registerHTTP registers the calling peer. Its tailnet identity is the
-// peer's, from WhoIs; the body's is ignored.
+// registerHTTP registers the calling peer. Its tailnet identity and
+// tailnet name are the peer's, from WhoIs; the body's are ignored.
 func (s *Server) registerHTTP(r *http.Request) (any, error) {
-	ident, err := peerIdentity(r)
+	ident, tailnetName, err := peerIdentity(r)
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +303,7 @@ func (s *Server) registerHTTP(r *http.Request) (any, error) {
 	if err := decode(r, &req); err != nil {
 		return nil, err
 	}
-	req.TailnetIdentity = ident
+	req.TailnetIdentity, req.TailnetName = ident, tailnetName
 	n, err := s.Register(r.Context(), req)
 	if err != nil {
 		return nil, err
@@ -313,7 +314,7 @@ func (s *Server) registerHTTP(r *http.Request) (any, error) {
 // heartbeatHTTP records a heartbeat from the calling peer, which must be
 // the node it names.
 func (s *Server) heartbeatHTTP(r *http.Request) (any, error) {
-	ident, err := peerIdentity(r)
+	ident, _, err := peerIdentity(r)
 	if err != nil {
 		return nil, err
 	}
@@ -360,6 +361,7 @@ func (s *Server) apiNode(n store.Node, now time.Time) core.Node {
 		ID:              n.ID,
 		Name:            n.Name,
 		TailnetIdentity: n.TailnetIdentity,
+		TailnetName:     n.TailnetName,
 		OS:              n.OS,
 		Arch:            n.Arch,
 		GaiaVersion:     n.GaiaVersion,
@@ -388,6 +390,7 @@ func (s *Server) Register(ctx context.Context, req core.RegisterNodeRequest) (co
 	n := store.Node{
 		Name:            req.Name,
 		TailnetIdentity: req.TailnetIdentity,
+		TailnetName:     req.TailnetName,
 		OS:              req.OS,
 		Arch:            req.Arch,
 		GaiaVersion:     req.GaiaVersion,
@@ -411,7 +414,7 @@ func (s *Server) Register(ctx context.Context, req core.RegisterNodeRequest) (co
 	if err != nil {
 		return core.Node{}, err
 	}
-	s.log.Info("node registered", "id", n.ID.String(), "name", n.Name, "updated", found)
+	s.log.Info("node registered", "id", n.ID.String(), "name", n.Name, "tailnet_name", n.TailnetName, "updated", found)
 	return s.apiNode(n, now), nil
 }
 

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/techspeque/gaia/internal/core"
-	"github.com/techspeque/gaia/internal/node"
 )
 
 const nodesFixture = "../../testdata/contract/gaia/api-v1/nodes.json"
@@ -81,8 +80,10 @@ func TestNodesJSONMatchesFixture(t *testing.T) {
 	if _, err := time.Parse(time.RFC3339Nano, seen); err != nil {
 		t.Errorf("last_seen: %v", err)
 	}
-	local := node.LocalRequest(version)
-	for k, v := range map[string]string{"name": local.Name, "os": runtime.GOOS, "arch": runtime.GOARCH, "gaia_version": version} {
+	// A fresh state directory: the host, and so its own node, is
+	// gaia-<machine name>.
+	name := defaultName(machineName(os.Hostname), "host")
+	for k, v := range map[string]string{"name": name, "os": runtime.GOOS, "arch": runtime.GOARCH, "gaia_version": version} {
 		if g[k] != v {
 			t.Errorf("%s = %v, want %q", k, g[k], v)
 		}
@@ -112,7 +113,7 @@ func TestNodesText(t *testing.T) {
 	if len(lines) != 2 || !strings.HasPrefix(lines[0], "NAME") {
 		t.Fatalf("output:\n%s", out)
 	}
-	for _, want := range []string{node.LocalRequest(version).Name, "online", runtime.GOOS + "/" + runtime.GOARCH} {
+	for _, want := range []string{defaultName(machineName(os.Hostname), "host"), "-", "online", runtime.GOOS + "/" + runtime.GOARCH} {
 		if !strings.Contains(lines[1], want) {
 			t.Errorf("row %q lacks %q", lines[1], want)
 		}

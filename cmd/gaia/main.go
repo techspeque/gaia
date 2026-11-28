@@ -21,8 +21,11 @@ var (
 
 const usage = `usage: gaia <command> [flags]
 
-  host [--state DIR] [--node]   run the host daemon; --node also runs this
-                                machine as a node (local-only mode)
+  host [--state DIR] [--node] [--name NAME]
+                                run the host daemon; --node also runs this
+                                machine as a node (local-only mode); --name
+                                is its tailnet and node name (default
+                                gaia-<machine name>, then kept in the state)
        [--tailnet [--control-url URL] --allow ENTRY... | --allow-file PATH
         [--auth-key-file PATH]]
                                 also join a tailnet and serve the API on it;
@@ -34,8 +37,10 @@ const usage = `usage: gaia <command> [flags]
   node --host NAME [--join [--auth-key-file PATH]] [--state DIR]
        [--name NAME] [--control-url URL]
                                 run this machine as a node of the host NAME
-                                over the tailnet; --join (once) joins the
-                                tailnet with the auth key, as for the host
+                                (the host's tailnet name, which it logs as
+                                tailnet_name) over the tailnet; --join (once)
+                                joins the tailnet with the auth key, as for
+                                the host; --name as for the host
   nodes [-o text|json]          list the machines registered with the host
   nodes remove NAME             remove a retired machine from the registry
   service install (host [--node] [--tailnet ...] | node --host NAME)

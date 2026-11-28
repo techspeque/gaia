@@ -99,6 +99,45 @@ func TestRegisterOverTailnetTakesIdentityFromWhoIs(t *testing.T) {
 	}
 }
 
+// TestRegisterSuffixedTailnetName is a node that asked for gaia-box and was
+// given gaia-box-1 by the control server: the registry keeps the asked name,
+// records the assigned one from WhoIs (never the body's), and a node:
+// allowlist entry matches only the assigned one.
+func TestRegisterSuffixedTailnetName(t *testing.T) {
+	s, _ := newServer(t)
+	a, err := ParseAllowlist([]string{"node:gaia-box-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.opts.Allowlist = a
+	h := s.TailnetHandler(fakeWhoIs{
+		addrA: {NodeName: "gaia-box-1", StableID: "nSTABLEA"},
+		addrB: {NodeName: "gaia-box", StableID: "nSTABLEB"},
+	})
+	req := registerReq("gaia-box")
+	req.TailnetName = "claimed" // must be ignored
+	status, body := send(t, h, addrA, http.MethodPost, core.NodesPath, req)
+	if status != http.StatusOK {
+		t.Fatalf("register: %d %s", status, body)
+	}
+	var res core.RegisterNodeResponse
+	if err := json.Unmarshal(body, &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Node.Name != "gaia-box" || res.Node.TailnetName != "gaia-box-1" {
+		t.Errorf("registered %+v", res.Node)
+	}
+	l := listNodes(t, s)
+	if len(l) != 1 || l[0].TailnetName != "gaia-box-1" {
+		t.Errorf("nodes %+v", l)
+	}
+	// A peer whose assigned name is the registry name, gaia-box, is not
+	// node:gaia-box-1.
+	if status, body := send(t, h, addrB, http.MethodGet, core.NodesPath, nil); status != http.StatusForbidden {
+		t.Errorf("peer gaia-box: %d %s, want 403", status, body)
+	}
+}
+
 func TestRegisterRejectsBadRequests(t *testing.T) {
 	_, h, _ := registryHandler(t)
 	for _, c := range []struct {

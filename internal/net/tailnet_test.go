@@ -292,6 +292,16 @@ func TestLookupPeerAndHasState(t *testing.T) {
 		}
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	self, err := a.Self(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (SelfName{Name: "gaia-host", DNSName: "gaia-host." + nettest.MagicDNSDomain}); self != want {
+		t.Errorf("Self = %+v, want %+v", self, want)
+	}
+
 	if !HasState(filepath.Dir(a.dir)) {
 		t.Error("HasState is false after a join")
 	}

@@ -13,7 +13,7 @@ land, one directory per API version:
 
 | Directory | Source | Checked by |
 |---|---|---|
-| `gaia/api-v1/nodes.json` | `gaia nodes -o json` with one node in local-only mode; neutral id, name and time | `cmd/gaia/cli` (shape, byte for byte) and `cmd/gaia` (against a live `gaia host --node`) |
+| `gaia/api-v1/nodes.json` | `gaia nodes -o json` with one node in local-only mode (default name `gaia-<machine name>`, no tailnet name); neutral id, name and time | `cmd/gaia/cli` (shape, byte for byte) and `cmd/gaia` (against a live `gaia host --node`) |
 
 A change to one of these shapes is a breaking change for its readers. The launcher contract Gaia provides is
 `docs/contracts/launcher-v1.md`.

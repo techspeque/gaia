@@ -253,6 +253,31 @@ func (t *Tailnet) Dial(ctx context.Context, network, address string) (stdnet.Con
 	return t.srv.Dial(ctx, network, address)
 }
 
+// SelfName is this node's name on the tailnet as the control server
+// assigned it. It can differ from Config.Hostname: a control server that
+// already has a device by that name gives this one a suffixed name.
+type SelfName struct {
+	// Name is the MagicDNS short name, the first label of DNSName: what
+	// peers see as Peer.NodeName and look this node up by. "" when the
+	// control server gives no MagicDNS name.
+	Name string
+	// DNSName is the full MagicDNS name without the trailing dot, or "".
+	DNSName string
+}
+
+// Self returns this node's assigned tailnet name.
+func (t *Tailnet) Self(ctx context.Context) (SelfName, error) {
+	st, err := t.lc.Status(ctx)
+	if err != nil {
+		return SelfName{}, fmt.Errorf("tailnet: status: %w", err)
+	}
+	if st.Self == nil {
+		return SelfName{}, errors.New("tailnet: status has no self node")
+	}
+	dns := strings.TrimSuffix(st.Self.DNSName, ".")
+	return SelfName{Name: nodeName(dns, ""), DNSName: dns}, nil
+}
+
 // Addr returns this node's tailnet IPv4 address, or "" when it has none.
 func (t *Tailnet) Addr() string {
 	ip4, _ := t.srv.TailscaleIPs()

@@ -166,8 +166,8 @@ func TestMachineName(t *testing.T) {
 	}{
 		{"Build-Box.local", nil, "build-box"},
 		{"laptop", nil, "laptop"},
-		{"", nil, "gaia-host"},
-		{"x", errors.New("no"), "gaia-host"},
+		{"", nil, ""},
+		{"x", errors.New("no"), ""},
 	} {
 		if got := machineName(func() (string, error) { return c.h, c.err }); got != c.want {
 			t.Errorf("machineName(%q) = %q, want %q", c.h, got, c.want)

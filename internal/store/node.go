@@ -18,15 +18,18 @@ type Node struct {
 	ID              core.NodeID
 	Name            string
 	TailnetIdentity string
-	OS              string
-	Arch            string
-	GaiaVersion     string
-	APIVersion      int
-	CreatedAt       time.Time
-	LastSeen        time.Time
+	// TailnetName is the MagicDNS short name the control server assigned
+	// the node, which may differ from Name; "" when unknown.
+	TailnetName string
+	OS          string
+	Arch        string
+	GaiaVersion string
+	APIVersion  int
+	CreatedAt   time.Time
+	LastSeen    time.Time
 }
 
-const nodeColumns = `id, name, tailnet_identity, os, arch, gaia_version, api_version, created_at, last_seen`
+const nodeColumns = `id, name, tailnet_identity, tailnet_name, os, arch, gaia_version, api_version, created_at, last_seen`
 
 // CreateNode inserts n. A duplicate id, name or tailnet identity is a
 // core.CodeConflict error.
@@ -35,8 +38,8 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 		return err
 	}
 	_, err := s.w.ExecContext(ctx,
-		`INSERT INTO nodes (`+nodeColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		n.ID.String(), n.Name, n.TailnetIdentity, n.OS, n.Arch, n.GaiaVersion, n.APIVersion,
+		`INSERT INTO nodes (`+nodeColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		n.ID.String(), n.Name, n.TailnetIdentity, n.TailnetName, n.OS, n.Arch, n.GaiaVersion, n.APIVersion,
 		n.CreatedAt.UnixNano(), n.LastSeen.UnixNano())
 	if isUniqueViolation(err) {
 		return &core.Error{
@@ -86,8 +89,9 @@ func (s *Store) UpdateNodeLastSeen(ctx context.Context, id core.NodeID, t time.T
 	return affectedOne(res, err, id)
 }
 
-// UpdateNode stores n's name, tailnet identity, os, arch, gaia version, API
-// version and last_seen on the row with n's id; created_at is kept. A
+// UpdateNode stores n's name, tailnet identity, tailnet name, os, arch, gaia
+// version, API version and last_seen on the row with n's id; created_at is
+// kept. A
 // missing row is core.CodeNotFound; a name or identity another node holds
 // is core.CodeConflict.
 func (s *Store) UpdateNode(ctx context.Context, n Node) error {
@@ -98,9 +102,9 @@ func (s *Store) UpdateNode(ctx context.Context, n Node) error {
 		return err
 	}
 	res, err := s.w.ExecContext(ctx,
-		`UPDATE nodes SET name = ?, tailnet_identity = ?, os = ?, arch = ?, gaia_version = ?,
-		 api_version = ?, last_seen = ? WHERE id = ?`,
-		n.Name, n.TailnetIdentity, n.OS, n.Arch, n.GaiaVersion, n.APIVersion, n.LastSeen.UnixNano(), n.ID.String())
+		`UPDATE nodes SET name = ?, tailnet_identity = ?, tailnet_name = ?, os = ?, arch = ?,
+		 gaia_version = ?, api_version = ?, last_seen = ? WHERE id = ?`,
+		n.Name, n.TailnetIdentity, n.TailnetName, n.OS, n.Arch, n.GaiaVersion, n.APIVersion, n.LastSeen.UnixNano(), n.ID.String())
 	if isUniqueViolation(err) {
 		return &core.Error{
 			Code:    core.CodeConflict,
@@ -137,7 +141,7 @@ func scanNode(row interface{ Scan(...any) error }) (Node, error) {
 		id            string
 		created, seen int64
 	)
-	if err := row.Scan(&id, &n.Name, &n.TailnetIdentity, &n.OS, &n.Arch, &n.GaiaVersion,
+	if err := row.Scan(&id, &n.Name, &n.TailnetIdentity, &n.TailnetName, &n.OS, &n.Arch, &n.GaiaVersion,
 		&n.APIVersion, &created, &seen); err != nil {
 		return Node{}, err
 	}

@@ -45,7 +45,7 @@ func runNode(args []string, stderr io.Writer, goos string) int {
 	hostName := fs.String("host", "", "the host's tailnet name (MagicDNS name or its first label) or tailnet IP; required")
 	join := fs.Bool("join", false, "join the tailnet now, with the auth key from $GAIA_AUTHKEY, $TS_AUTHKEY or --auth-key-file; needed once")
 	stateFlag := fs.String("state", "", "state directory (default: "+describeDefaultState(goos)+")")
-	nameFlag := fs.String("name", "", "this node's name in the registry and on the tailnet (default: the machine name)")
+	nameFlag := fs.String("name", "", "this node's name in the registry, and the tailnet name it asks for (default: the name recorded in the state directory, else gaia-<machine name>)")
 	controlURL := fs.String("control-url", "", "tailnet control server URL, Tailscale or Headscale (default: Tailscale's)")
 	authKeyFile := fs.String("auth-key-file", "", "file holding the tailnet auth key, not group or other readable; needs --join")
 	if err := fs.Parse(args); err != nil {
@@ -74,15 +74,11 @@ func runNode(args []string, stderr io.Writer, goos string) int {
 			return 2
 		}
 	}
-	name := *nameFlag
-	if name == "" {
-		if name = machineName(os.Hostname); name == "gaia-host" {
-			name = "gaia-node"
+	if *nameFlag != "" {
+		if err := core.ValidNodeName(*nameFlag); err != nil {
+			fmt.Fprintf(stderr, "gaia node: --name: %s\n", err.(*core.Error).Message)
+			return 2
 		}
-	}
-	if err := core.ValidNodeName(name); err != nil {
-		fmt.Fprintf(stderr, "gaia node: --name: %s\n", err.(*core.Error).Message)
-		return 2
 	}
 	state := *stateFlag
 	if state == "" {
@@ -91,6 +87,13 @@ func runNode(args []string, stderr io.Writer, goos string) int {
 			fmt.Fprintf(stderr, "gaia node: %v; pass --state DIR\n", err)
 			return 1
 		}
+	}
+	// Resolved before ensureStateDir creates the state directory, which
+	// would make a new one look used before.
+	name, err := resolveName(*nameFlag, state, machineName(os.Hostname), "node")
+	if err != nil {
+		fmt.Fprintf(stderr, "gaia node: %v\n", err)
+		return 1
 	}
 
 	// The key is read, and the variables unset, with or without --join, so
@@ -113,6 +116,10 @@ func runNode(args []string, stderr io.Writer, goos string) int {
 		return 1
 	case !*join && !gnet.HasState(state):
 		fmt.Fprintf(stderr, "gaia node: %s holds no tailnet state: run once with --join and an auth key\n", state)
+		return 1
+	}
+	if err := recordName(state, name); err != nil {
+		fmt.Fprintf(stderr, "gaia node: %v\n", err)
 		return 1
 	}
 
@@ -158,7 +165,7 @@ func nodeDaemon(cfg nodeConfig, log *slog.Logger) int {
 			return nil, "", err
 		}
 		c, err := t.Dial(ctx, "tcp", netip.AddrPortFrom(p.Addr, tailnetPort).String())
-		return c, p.DNSName, err
+		return c, p.DNSName, refusedHint(err, cfg.host, p.DNSName)
 	})
 	defer transport.CloseIdleConnections()
 	base := &url.URL{Scheme: "https", Host: cfg.host}
@@ -197,6 +204,7 @@ func nodeDaemon(cfg nodeConfig, log *slog.Logger) int {
 	}()
 	tn.Store(t)
 	log.Info("joined the tailnet", "tailnet_addr", t.Addr())
+	reportTailnetName(ctx, t, cfg.name, "node", log)
 
 	runDone := make(chan error, 1)
 	go func() {
@@ -223,6 +231,20 @@ func nodeDaemon(cfg nodeConfig, log *slog.Logger) int {
 	}
 	log.Info("node stopped", "exit_code", code)
 	return code
+}
+
+// refusedHint adds to a refused dial of the host what is likely wrong: the
+// device --host names (dnsName) runs no Gaia host, typically because it is
+// the host machine's own Tailscale device and Gaia's is called
+// gaia-<machine name> or another name the host logs. Other errors, and nil,
+// are returned as they are.
+func refusedHint(err error, host, dnsName string) error {
+	if err == nil || !strings.Contains(err.Error(), "connection refused") {
+		return err
+	}
+	return fmt.Errorf("%w: --host %s is %s, where nothing answers on port %d, so it is not a Gaia host; "+
+		"a Gaia host asks for the tailnet name gaia-<machine name> and logs the tailnet_name it was given",
+		err, host, dnsName, tailnetPort)
 }
 
 // serveHTTP serves h on l until ctx is done, then shuts down, waiting up to
