@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/techspeque/gaia/internal/core"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // Session is a session as stored (OVERVIEW §2.2). Profile, RepoRemote,
@@ -58,7 +61,7 @@ func (s *Store) CreateSession(ctx context.Context, sess Session) error {
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sess.ID.String(), sess.NodeID.String(), profile, sess.RepoRemote, sess.Branch, sess.Slice,
 		string(sess.Mode), string(argv), string(sess.State), sess.StartedAt.UnixNano())
-	if isUniqueViolation(err) {
+	if isUniqueViolation(err) || isDuplicateSession(err) {
 		return &core.Error{
 			Code:    core.CodeConflict,
 			Message: fmt.Sprintf("a session with id %s already exists", sess.ID),
@@ -233,4 +236,12 @@ func sessionNotFound(id core.SessionID) *core.Error {
 		Message: fmt.Sprintf("session %s not found", id),
 		Details: map[string]string{"id": id.String()},
 	}
+}
+
+// isDuplicateSession reports whether err is the sessions_no_replace trigger
+// refusing an existing id, which it does before the primary key is checked.
+func isDuplicateSession(err error) bool {
+	var se *sqlite.Error
+	return errors.As(err, &se) && se.Code() == sqlite3.SQLITE_CONSTRAINT_TRIGGER &&
+		strings.Contains(se.Error(), "session id already exists")
 }

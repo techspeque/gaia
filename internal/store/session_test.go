@@ -325,13 +325,17 @@ func TestTerminalSessionFrozenInSQL(t *testing.T) {
 			`UPDATE sessions SET exit_code = 99 WHERE id = ?`,
 			`UPDATE sessions SET argv = '["x"]' WHERE id = ?`,
 			`DELETE FROM sessions WHERE id = ?`,
+			`INSERT OR REPLACE INTO sessions (id, node_id, mode, argv, state, started_at)
+			 VALUES (?, 'n', 'headless', '["x"]', 'starting', 1)`,
+			`REPLACE INTO sessions (id, node_id, mode, argv, state, started_at)
+			 VALUES (?, 'n', 'headless', '["x"]', 'starting', 1)`,
 		} {
 			if _, err := s.w.ExecContext(ctx, q, sess.ID.String()); err == nil {
 				t.Errorf("%s: %q succeeded", st, q)
 			}
 		}
 		got, err := s.GetSession(ctx, sess.ID)
-		if err != nil || got.State != st {
+		if err != nil || got.State != st || got.ExitCode == nil || *got.ExitCode != 0 {
 			t.Errorf("%s: after raw SQL %+v, %v", st, got, err)
 		}
 	}

@@ -29,6 +29,16 @@ CREATE INDEX sessions_node_id ON sessions (node_id);
 
 -- A session in a terminal state never changes again, and no session row is
 -- deleted, whatever SQL is run.
+--
+-- INSERT OR REPLACE deletes the old row without firing a DELETE trigger, so
+-- an insert of an existing id is refused before conflict resolution runs.
+CREATE TRIGGER sessions_no_replace
+BEFORE INSERT ON sessions
+WHEN EXISTS (SELECT 1 FROM sessions WHERE id = NEW.id)
+BEGIN
+    SELECT RAISE(ABORT, 'session id already exists');
+END;
+
 CREATE TRIGGER sessions_terminal_frozen
 BEFORE UPDATE ON sessions
 WHEN OLD.state IN ('exited', 'stopped', 'failed')
