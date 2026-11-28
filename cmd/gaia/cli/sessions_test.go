@@ -4,7 +4,9 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -248,6 +250,38 @@ func TestLogsFollowResumes(t *testing.T) {
 	code, out, errOut := runCmd(Logs, c, id.String(), "--follow")
 	if code != 0 || out != "abcdefghi\n" {
 		t.Errorf("exit %d %q %q; requests %q", code, out, errOut, d.requests())
+	}
+}
+
+// failWriter fails every write with err.
+type failWriter struct{ err error }
+
+func (f failWriter) Write([]byte) (int, error) { return 0, f.err }
+
+// TestFollowSinkFailure: a writer that fails ends Follow at once with its
+// error while the session keeps running; it is not taken for a cut stream.
+func TestFollowSinkFailure(t *testing.T) {
+	d := newSessionDaemon()
+	id := core.NewSessionID([16]byte{1})
+	d.mux.HandleFunc("GET "+core.SessionLogsPath(id), func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "abc")
+	})
+	d.mux.HandleFunc("GET "+core.SessionPath(id), func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, core.GetSessionResponse{Session: core.Session{ID: id, NodeID: testNode, State: core.SessionRunning}})
+	})
+	c := &Client{Dir: fakeDaemon(t, d)}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	diskFull := errors.New("no space left on device")
+	err := c.Follow(ctx, id, 0, failWriter{diskFull})
+	if err != diskFull {
+		t.Errorf("follow into a failing writer: %v, want %v", err, diskFull)
+	}
+	for _, r := range d.requests() {
+		if r == "GET "+core.SessionPath(id) {
+			t.Errorf("the session was queried after the writer failed: %q", d.requests())
+			break
+		}
 	}
 }
 

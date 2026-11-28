@@ -95,11 +95,17 @@ func (c *Client) Logs(ctx context.Context, id core.SessionID, off int64, follow 
 // Follow writes the session's whole output from byte offset off to w, as
 // it is produced, and returns once the session has ended and every byte is
 // written. A stream that ends while the session runs is resumed from the
-// bytes received, so each byte is written once.
+// bytes received, so each byte is written once. A failure of w ends it at
+// once with w's error.
 func (c *Client) Follow(ctx context.Context, id core.SessionID, off int64, w io.Writer) error {
+	w = markWrites{w}
 	for {
 		n, err := c.Logs(ctx, id, off, true, w)
 		off += n
+		var se sinkError
+		if errors.As(err, &se) {
+			return se.error
+		}
 		var ce *core.Error
 		if errors.As(err, &ce) {
 			return err
@@ -114,6 +120,9 @@ func (c *Client) Follow(ctx context.Context, id core.SessionID, off int64, w io.
 		if sess.State.Terminal() {
 			// Whatever the last stream did not carry.
 			_, err := c.Logs(ctx, id, off, false, w)
+			if errors.As(err, &se) {
+				return se.error
+			}
 			return err
 		}
 		if n == 0 {
@@ -126,6 +135,22 @@ func (c *Client) Follow(ctx context.Context, id core.SessionID, off int64, w io.
 			}
 		}
 	}
+}
+
+// sinkError marks a failure of Follow's writer, as opposed to the stream's.
+type sinkError struct{ error }
+
+func (e sinkError) Unwrap() error { return e.error }
+
+// markWrites wraps w so that its failures are sinkErrors.
+type markWrites struct{ w io.Writer }
+
+func (m markWrites) Write(p []byte) (int, error) {
+	n, err := m.w.Write(p)
+	if err != nil {
+		return n, sinkError{err}
+	}
+	return n, nil
 }
 
 // runUsage is the usage text of `gaia run`.
