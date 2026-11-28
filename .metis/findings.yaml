@@ -270,9 +270,12 @@ findings:
       severity: P1
       category: behavior
       finding: 'internal/node/session.go:645 — If the daemon dies after ready but before persisting running, and the agent exits before restart, reconcile attempts forbidden starting→exited; the record stays starting and its watcher exits without recording/reporting the real outcome. Reproduced by killing at ready, awaiting supervisor Ended(), then reopening: starting with nil exit code instead of exited/7. Recover through legal transitions and add a delayed-restart regression test.'
-      status: open
+      status: resolved
+      resolved_by: commit d8aaede95e5a; test TestRestartAfterEndAtReady; d8aaede
       cycle: 1
       file: internal/node/session.go
+      commit: d8aaede95e5a0e0d2f138fdee3e46d07bf6299e5
+      evidence: test TestRestartAfterEndAtReady
     - id: f-025
       date: "2026-11-28"
       slice: phase-1-ws-1.3
