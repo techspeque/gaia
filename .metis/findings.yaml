@@ -148,3 +148,12 @@ findings:
       status: open
       cycle: 1
       file: cmd/gaia/node.go
+    - id: f-015
+      date: "2026-11-28"
+      slice: fix-0003
+      severity: P2
+      category: behavior
+      finding: cmd/gaia/name.go:83 — Any nonempty state directory is treated as a legacy install, rather than checking for prior tsnet state or a host registry as the brief requires. A never-joined directory containing only an auth-key file resolves studio instead of gaia-studio, recreating the naming collision (TestReviewFreshStateWithIncidentalFile). — Detect the specified legacy-state markers and test that unrelated files do not suppress the gaia- default.
+      status: open
+      cycle: 1
+      file: cmd/gaia/name.go
