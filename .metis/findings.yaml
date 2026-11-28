@@ -139,3 +139,12 @@ findings:
       finding: 'Gate run 1 (v0.0.1): the tailnet client creates an empty ~/.local/share/tailscale (tsnet logpolicy ''using system state directory'') outside Gaia''s state directory on the first join, although logtail is disabled (internal/net/tailnet.go:81). Harmless, but OVERVIEW 8 says the state directory is the one thing to back up and README says the node''s state is only <state>/tsnet.'
       status: advisory
       file: internal/net/tailnet.go
+    - id: f-014
+      date: "2026-11-28"
+      slice: fix-0003
+      severity: P2
+      category: behavior
+      finding: 'cmd/gaia/node.go:242 — refusedHint matches "connection refused", but an actual tsnet dial to a peer with port 443 closed returns "connect tcp 100.64.0.1:443: connection was refused"; the required retry hint is absent (TestReviewActualTailnetRefusalHint reproduced against the local test tailnet). — Recognize the actual tsnet refusal and add a regression test using that error or a real closed tailnet port.'
+      status: open
+      cycle: 1
+      file: cmd/gaia/node.go

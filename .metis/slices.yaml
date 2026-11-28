@@ -9,9 +9,9 @@ slices:
       reviewer: codex/gpt-6-astra
       plan: .metis/plans/phase-0-plan.md
       plan_section: 'Workstream 0.7: Node role, registration and heartbeat'
-      coded: true
+      coded: false
       reviewed: false
-      review_cycles: 0
+      review_cycles: 1
       notes: |-
         Found by phase-0-gate run 1 (v0.0.1, see .metis/briefs/phase-0-gate.md, Findings). Both gate hosts already run the system Tailscale client under their machine name. gaia host asks the control server for the machine name and is given MACHINE-1; gaia node (default --name = machine name) is given MACHINE-1 too. Effects: (1) gaia node --host <host machine name>, as README shows, resolves to the machine's own Tailscale device, not Gaia's, and retries 'connection was refused' forever with no hint; (2) --allow node:<node's --name>, as README suggests, is refused 403 because the peer's tailnet name is the suffixed one, while the registry name stays unsuffixed: README's 'name in the registry and on the tailnet' is false here; (3) Gaia never prints the tailnet name it was given (host and node log only the address), so the names needed for --host and node: can only be found from another device or the admin console, and the host's allowlist can only be completed after the node has joined, with a host restart. ADR-0004 promises a stable name from --join. Required: the documented README steps for host and node work, unedited, on machines that already run Tailscale; each daemon reports the tailnet name it was given (log and/or a command); README states exactly which name --host and node: take. How (a --name for the host, a distinct default such as a gaia- prefix, a hint when --host resolves to a device with nothing on 443, matching node: on another field) is the Coder's design within ADR-0004; node: must stay bound to a control-server-asserted name, never to the self-claimed registry name. Then a release carrying the fix, and the gate re-runs from scenario 2.
 
