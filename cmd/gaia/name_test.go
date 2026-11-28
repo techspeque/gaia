@@ -163,10 +163,15 @@ func TestRefusedHint(t *testing.T) {
 	if refusedHint(other, "h", "h.ts.net") != other {
 		t.Error("other error changed")
 	}
-	refused := errors.New("dial tcp 100.64.0.1:443: connect: connection refused")
-	err := refusedHint(refused, "studio", "studio.tail.ts.net")
-	if !errors.Is(err, refused) || !strings.Contains(err.Error(), "--host studio is studio.tail.ts.net") ||
-		!strings.Contains(err.Error(), "gaia-<machine name>") {
-		t.Errorf("hint %v", err)
+	for _, refused := range []error{
+		errors.New("dial tcp 100.64.0.1:443: connect: connection refused"),
+		// What a tsnet dial to a peer with port 443 closed returns.
+		errors.New("connect tcp 100.64.0.1:443: connection was refused"),
+	} {
+		err := refusedHint(refused, "studio", "studio.tail.ts.net")
+		if !errors.Is(err, refused) || !strings.Contains(err.Error(), "--host studio is studio.tail.ts.net") ||
+			!strings.Contains(err.Error(), "gaia-<machine name>") {
+			t.Errorf("hint for %q: %v", refused, err)
+		}
 	}
 }

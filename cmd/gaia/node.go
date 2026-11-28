@@ -237,9 +237,13 @@ func nodeDaemon(cfg nodeConfig, log *slog.Logger) int {
 // device --host names (dnsName) runs no Gaia host, typically because it is
 // the host machine's own Tailscale device and Gaia's is called
 // gaia-<machine name> or another name the host logs. Other errors, and nil,
-// are returned as they are.
+// are returned as they are. A refusal reads "connection refused" from the
+// kernel and "connection was refused" from tsnet's netstack.
 func refusedHint(err error, host, dnsName string) error {
-	if err == nil || !strings.Contains(err.Error(), "connection refused") {
+	if err == nil {
+		return nil
+	}
+	if msg := err.Error(); !strings.Contains(msg, "connection refused") && !strings.Contains(msg, "connection was refused") {
 		return err
 	}
 	return fmt.Errorf("%w: --host %s is %s, where nothing answers on port %d, so it is not a Gaia host; "+
