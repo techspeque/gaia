@@ -264,3 +264,12 @@ findings:
       status: advisory
       cycle: 1
       file: internal/supervise/protocol.go
+    - id: f-024
+      date: "2026-11-28"
+      slice: phase-1-ws-1.3
+      severity: P1
+      category: behavior
+      finding: 'internal/node/session.go:645 — If the daemon dies after ready but before persisting running, and the agent exits before restart, reconcile attempts forbidden starting→exited; the record stays starting and its watcher exits without recording/reporting the real outcome. Reproduced by killing at ready, awaiting supervisor Ended(), then reopening: starting with nil exit code instead of exited/7. Recover through legal transitions and add a delayed-restart regression test.'
+      status: open
+      cycle: 1
+      file: internal/node/session.go
