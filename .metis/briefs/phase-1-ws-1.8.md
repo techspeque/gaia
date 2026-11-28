@@ -107,4 +107,23 @@ None.
 
 ## Report
 
-Filled at implementation.
+- Files: `cmd/gaia/metis_test.go` (new), `testdata/metis-agent.sh` (new),
+  `README.md` ("Running Metis agents on a node").
+- `metis verify --post`: ALL GREEN (`make verify`). Against metis 0.0.25:
+  `TestMetisLaunchRemote` 1.6 s, `TestMetisAutoRemote` 3.0 s,
+  `TestMetisAutoInterrupt` 0.8 s (metis auto exits 130, session `stopped`),
+  `TestGaiaNeverNamesMetisDir`, `TestParseMetisVersion` pass.
+- Decisions beyond the design list:
+  - The temporary project carries a one-workstream plan and the slice's
+    `plan_section`: `metis auto` refuses to run a slice unattended without
+    one (stop rule `planning`).
+  - Each agent's behaviour per run comes from a STEPS file outside the
+    repository, named in its fixed launch argv, since the session gets the
+    node's environment, not the caller's.
+  - `metis show` does not find an archived slice, so after `metis auto` the
+    test reads the work branch's commits (`flip coded`, `flip reviewed`,
+    `archive 1 slice(s)`) and `.metis/slices-done.yaml`.
+  - The skip is checked in `TestNeedMetisSkips` (empty `PATH`; a fake
+    `metis 0.0.24`), since the tests cannot be run here with `metis` taken
+    off `PATH`.
+- No product code changed; `internal/metis` stays the Phase 3 placeholder.
