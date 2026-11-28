@@ -47,7 +47,9 @@ func (c *Client) GetSession(ctx context.Context, id core.SessionID) (core.Sessio
 	return r.Session, err
 }
 
-// StartSession connects, then asks the host to start req.
+// StartSession connects, then asks the host to start req. A start with a
+// repository is bounded by ctx only: it includes readying the node's
+// checkout, and waiting for a session that holds it.
 func (c *Client) StartSession(ctx context.Context, req core.StartSessionRequest) (core.Session, error) {
 	var r core.StartSessionResponse
 	if err := req.Validate(); err != nil {
@@ -56,7 +58,11 @@ func (c *Client) StartSession(ctx context.Context, req core.StartSessionRequest)
 	if _, err := c.Connect(ctx); err != nil {
 		return r.Session, err
 	}
-	_, err := c.send(ctx, c.httpClientTimeout(StopTimeout), http.MethodPost, core.SessionsPath, req, &r)
+	timeout := StopTimeout
+	if req.Repo != "" {
+		timeout = 0
+	}
+	_, err := c.send(ctx, c.httpClientTimeout(timeout), http.MethodPost, core.SessionsPath, req, &r)
 	return r.Session, err
 }
 
@@ -154,11 +160,17 @@ func (m markWrites) Write(p []byte) (int, error) {
 }
 
 // runUsage is the usage text of `gaia run`.
-const runUsage = `usage: gaia run --node NODE (--detach | --interactive) [--profile PROFILE] -- ARGV...
-  Starts ARGV on NODE, under the node user's environment. --detach prints
-  the session id and returns at once; the session runs on. --interactive
-  gives ARGV a terminal and attaches to it, as gaia attach does: Ctrl-]
-  detaches, and the session runs on.`
+const runUsage = `usage: gaia run --node NODE [--profile PROFILE] [--repo URL --branch BRANCH]
+                (--wait [--detach-on-interrupt] | --detach | --interactive) -- ARGV...
+  Starts ARGV on NODE, under the node user's environment; with a repo, in
+  the node's checkout of it at the remote branch's tip, pushed when the
+  session ends. --wait acts as ARGV run here (launcher contract v1): its
+  output on stdout, its exit code, codes 90-99 for Gaia's own failures, and
+  an interrupt stops it (--detach-on-interrupt leaves it running); --repo
+  and --branch default to this checkout's origin and current branch, which
+  must be pushed. --detach prints the session id and returns at once.
+  --interactive gives ARGV a terminal and attaches to it, as gaia attach
+  does: Ctrl-] detaches. Either way the session runs on.`
 
 // Run runs `gaia run` and returns the exit code.
 func Run(args []string, env Env) int {
@@ -180,7 +192,11 @@ func Run(args []string, env Env) int {
 	nodeName := fs.String("node", "", "")
 	detach := fs.Bool("detach", false, "")
 	interactive := fs.Bool("interactive", false, "")
+	wait := fs.Bool("wait", false, "")
+	detachOnInterrupt := fs.Bool("detach-on-interrupt", false, "")
 	profile := fs.String("profile", "", "")
+	repoURL := fs.String("repo", "", "")
+	branch := fs.String("branch", "", "")
 	if err := fs.Parse(flags); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Fprintln(env.Stderr, runUsage)
@@ -188,15 +204,23 @@ func Run(args []string, env Env) int {
 		}
 		return usage(err.Error())
 	}
+	modes := 0
+	for _, m := range []bool{*detach, *interactive, *wait} {
+		if m {
+			modes++
+		}
+	}
 	switch {
 	case fs.NArg() > 0:
 		return usage(fmt.Sprintf("unexpected argument %q: put the agent's argv after --", fs.Arg(0)))
 	case *nodeName == "":
 		return usage("--node NODE is required")
-	case *detach && *interactive:
-		return usage("--detach and --interactive cannot be combined")
-	case !*detach && !*interactive:
-		return usage("--detach or --interactive is required (--wait is not available yet)")
+	case modes > 1:
+		return usage("--wait, --detach and --interactive cannot be combined")
+	case modes == 0:
+		return usage("one of --wait, --detach or --interactive is required")
+	case *detachOnInterrupt && !*wait:
+		return usage("--detach-on-interrupt needs --wait")
 	case i < 0:
 		return usage("put the agent's argv after --")
 	case len(argv) == 0:
@@ -206,11 +230,29 @@ func Run(args []string, env Env) int {
 	if *interactive {
 		mode = core.SessionInteractive
 	}
-	req := core.StartSessionRequest{Node: *nodeName, Mode: mode, Argv: argv, Profile: *profile}
+	req := core.StartSessionRequest{Node: *nodeName, Mode: mode, Argv: argv, Profile: *profile, Repo: *repoURL, Branch: *branch}
+	if *wait {
+		// Validate what the caller typed before reading its checkout.
+		probe := req
+		probe.Repo, probe.Branch = "", ""
+		if err := probe.Validate(); err != nil {
+			var ce *core.Error
+			errors.As(err, &ce)
+			return usage(ce.Message)
+		}
+		var code int
+		var ok bool
+		if req.Repo, req.Branch, code, ok = callerCheckout(env, *repoURL, *branch); !ok {
+			return code
+		}
+	}
 	if err := req.Validate(); err != nil {
 		var ce *core.Error
 		errors.As(err, &ce)
 		return usage(ce.Message)
+	}
+	if *wait {
+		return runWait(req, *detachOnInterrupt, env)
 	}
 	sess, err := env.Client.StartSession(context.Background(), req)
 	if err != nil {

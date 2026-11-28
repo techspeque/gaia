@@ -17,6 +17,7 @@ import (
 // Session is a session as stored (OVERVIEW §2.2). Profile, RepoRemote,
 // Branch and Slice are "" when none. EndedAt is zero until the session
 // reaches a terminal state; ExitCode is nil when no exit code is known.
+// Sync is where the session's after-session push is.
 type Session struct {
 	ID         core.SessionID
 	NodeID     core.NodeID
@@ -30,6 +31,7 @@ type Session struct {
 	StartedAt  time.Time
 	EndedAt    time.Time
 	ExitCode   *int
+	Sync       core.SyncState
 }
 
 // SessionExit is how a session ended: a terminal state, the time, and the
@@ -40,7 +42,7 @@ type SessionExit struct {
 	EndedAt  time.Time
 }
 
-const sessionColumns = `id, node_id, profile, repo_remote, branch, slice, mode, argv, state, started_at, ended_at, exit_code`
+const sessionColumns = `id, node_id, profile, repo_remote, branch, slice, mode, argv, state, started_at, ended_at, exit_code, sync`
 
 // CreateSession inserts s, which must be in state starting with no end time
 // or exit code. A duplicate id is a core.CodeConflict error.
@@ -57,10 +59,10 @@ func (s *Store) CreateSession(ctx context.Context, sess Session) error {
 		profile = sess.Profile
 	}
 	_, err = s.w.ExecContext(ctx,
-		`INSERT INTO sessions (id, node_id, profile, repo_remote, branch, slice, mode, argv, state, started_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO sessions (id, node_id, profile, repo_remote, branch, slice, mode, argv, state, started_at, sync)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sess.ID.String(), sess.NodeID.String(), profile, sess.RepoRemote, sess.Branch, sess.Slice,
-		string(sess.Mode), string(argv), string(sess.State), sess.StartedAt.UnixNano())
+		string(sess.Mode), string(argv), string(sess.State), sess.StartedAt.UnixNano(), string(sess.Sync))
 	if isUniqueViolation(err) || isDuplicateSession(err) {
 		return &core.Error{
 			Code:    core.CodeConflict,
@@ -135,6 +137,45 @@ func (s *Store) SetSessionExit(ctx context.Context, id core.SessionID, e Session
 		})
 }
 
+// SetSessionSync moves the sync of the session with id to to, in any
+// state, terminal included: from none to any state, from pending to done
+// or failed. A move to the current sync changes nothing; any other move is
+// a core.CodeConflict error and changes nothing; a missing session is
+// core.CodeNotFound.
+func (s *Store) SetSessionSync(ctx context.Context, id core.SessionID, to core.SyncState) error {
+	if !to.Valid() {
+		return invalidSession(fmt.Sprintf("sync %q is not a sync state", to))
+	}
+	tx, err := s.w.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var from string
+	err = tx.QueryRowContext(ctx, `SELECT sync FROM sessions WHERE id = ?`, id.String()).Scan(&from)
+	if errors.Is(err, sql.ErrNoRows) {
+		return sessionNotFound(id)
+	}
+	if err != nil {
+		return err
+	}
+	if core.SyncState(from) == to {
+		return nil
+	}
+	if !core.SyncState(from).CanMove(to) {
+		return &core.Error{
+			Code:    core.CodeConflict,
+			Message: fmt.Sprintf("illegal session sync change %q -> %q", from, to),
+			Details: map[string]string{"from": from, "to": string(to), "id": id.String()},
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET sync = ? WHERE id = ? AND sync = ?`,
+		string(to), id.String(), from); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // transitionSession reads the session's state and, if the state table
 // allows the move to to, runs update with args(from) in the same
 // transaction. The writer's transactions take the write lock at BEGIN, so
@@ -179,11 +220,13 @@ func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 		profile        sql.NullString
 		started        int64
 		ended, code    sql.NullInt64
+		sync           string
 	)
 	if err := row.Scan(&id, &node, &profile, &sess.RepoRemote, &sess.Branch, &sess.Slice,
-		&mode, &argv, &state, &started, &ended, &code); err != nil {
+		&mode, &argv, &state, &started, &ended, &code, &sync); err != nil {
 		return Session{}, err
 	}
+	sess.Sync = core.SyncState(sync)
 	var err error
 	if sess.ID, err = core.ParseSessionID(id); err != nil {
 		return Session{}, fmt.Errorf("stored session id: %w", err)
@@ -222,6 +265,8 @@ func validateNewSession(sess Session) error {
 		return invalidSession("started_at is zero")
 	case !sess.EndedAt.IsZero() || sess.ExitCode != nil:
 		return invalidSession("a new session has no end time or exit code")
+	case sess.Sync.Settled() || !sess.Sync.Valid():
+		return invalidSession(fmt.Sprintf("a new session's sync is %q, not none or pending", sess.Sync))
 	}
 	return core.ValidArgv(sess.Argv)
 }

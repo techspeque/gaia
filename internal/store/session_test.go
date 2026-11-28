@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -346,6 +347,70 @@ func TestTerminalSessionFrozenInSQL(t *testing.T) {
 	}
 }
 
+// TestSessionSync: sync moves forward only, also on a terminal row, and is
+// the only column of a terminal row that may change; a settled sync never
+// changes, through the store or raw SQL.
+func TestSessionSync(t *testing.T) {
+	ctx := context.Background()
+	s := mustOpen(t, stateDir(t))
+	sess := testSession(1)
+	sess.Sync = core.SyncPending
+	mustCreate(t, s, sess)
+	if got, _ := s.GetSession(ctx, sess.ID); got.Sync != core.SyncPending {
+		t.Fatalf("sync after create = %q", got.Sync)
+	}
+	if err := s.UpdateSessionState(ctx, sess.ID, core.SessionRunning); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSessionExit(ctx, sess.ID, SessionExit{State: core.SessionExited, ExitCode: intp(3), EndedAt: sess.StartedAt}); err != nil {
+		t.Fatal(err)
+	}
+	// Same value: no change, no error.
+	if err := s.SetSessionSync(ctx, sess.ID, core.SyncPending); err != nil {
+		t.Errorf("pending again: %v", err)
+	}
+	if err := s.SetSessionSync(ctx, sess.ID, core.SyncFailed); err != nil {
+		t.Fatalf("pending -> failed on an exited row: %v", err)
+	}
+	got, _ := s.GetSession(ctx, sess.ID)
+	if got.Sync != core.SyncFailed || got.State != core.SessionExited || got.ExitCode == nil || *got.ExitCode != 3 {
+		t.Errorf("after sync: %+v", got)
+	}
+	for _, to := range []core.SyncState{core.SyncDone, core.SyncPending, core.SyncNone} {
+		if err := s.SetSessionSync(ctx, sess.ID, to); !errors.Is(err, core.NewError(core.CodeConflict, "")) {
+			t.Errorf("failed -> %q: %v, want conflict", to, err)
+		}
+	}
+	if err := s.SetSessionSync(ctx, sess.ID, "bogus"); !errors.Is(err, core.NewError(core.CodeInvalidArgument, "")) {
+		t.Errorf("bogus: %v", err)
+	}
+	for _, q := range []string{
+		`UPDATE sessions SET sync = 'done' WHERE id = ?`,
+		`UPDATE sessions SET sync = 'pending' WHERE id = ?`,
+		`UPDATE sessions SET sync = 'x' WHERE id = ?`,
+		`UPDATE sessions SET sync = 'failed', exit_code = 0 WHERE id = ?`,
+	} {
+		if _, err := s.w.ExecContext(ctx, q, sess.ID.String()); err == nil {
+			t.Errorf("%q succeeded", q)
+		}
+	}
+	if err := s.SetSessionSync(ctx, sessionID(9), core.SyncDone); !errors.Is(err, core.NewError(core.CodeNotFound, "")) {
+		t.Errorf("missing session: %v", err)
+	}
+	// A new session cannot start settled.
+	bad := testSession(2)
+	bad.Sync = core.SyncDone
+	if err := s.CreateSession(ctx, bad); !errors.Is(err, core.NewError(core.CodeInvalidArgument, "")) {
+		t.Errorf("create with sync done: %v", err)
+	}
+	// None moves to anything.
+	plain := testSession(3)
+	mustCreate(t, s, plain)
+	if err := s.SetSessionSync(ctx, plain.ID, core.SyncDone); err != nil {
+		t.Errorf("none -> done: %v", err)
+	}
+}
+
 // TestSessionSchemaChecks checks the table's CHECK constraints refuse rows
 // the store would never write.
 func TestSessionSchemaChecks(t *testing.T) {
@@ -401,7 +466,7 @@ func TestSessionColumnsHoldNoCredential(t *testing.T) {
 		cols = append(cols, c)
 	}
 	want := []string{"id", "node_id", "profile", "repo_remote", "branch", "slice", "mode", "argv",
-		"state", "started_at", "ended_at", "exit_code"}
+		"state", "started_at", "ended_at", "exit_code", "sync"}
 	if !slices.Equal(cols, want) {
 		t.Errorf("columns = %v, want %v", cols, want)
 	}

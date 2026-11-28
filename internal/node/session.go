@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/techspeque/gaia/internal/core"
+	"github.com/techspeque/gaia/internal/repo"
 	"github.com/techspeque/gaia/internal/supervise"
 )
 
@@ -49,6 +50,10 @@ const (
 	// its supervisor still answers, streams again.
 	rewatchDelay = 200 * time.Millisecond
 )
+
+// finishTimeout bounds a session's after-session push. A variable for
+// tests.
+var finishTimeout = 10 * time.Minute
 
 // testHook, when set by a test, is called at named steps of a session's
 // life, so a test can kill the daemon exactly there.
@@ -90,6 +95,9 @@ type ManagerConfig struct {
 	MinBackoff, MaxBackoff time.Duration
 	// Logger receives progress and failures. Default: discard.
 	Logger *slog.Logger
+	// Workspace holds the node's checkouts, for sessions started with a
+	// repository (ADR-0010). Nil: such a start is refused.
+	Workspace *repo.Workspace
 }
 
 // StartSpec is a session to start. Env and Secrets may hold secret values:
@@ -100,8 +108,14 @@ type StartSpec struct {
 	ID   core.SessionID
 	Mode core.SessionMode
 	Argv []string
-	// WorkDir is the absolute directory the agent starts in.
+	// WorkDir is the absolute directory the agent starts in, when Repo is
+	// "".
 	WorkDir string
+	// Repo and Branch, both set or both "", name the remote URL and branch
+	// the agent runs in: the node's checkout of Repo, readied with
+	// repo.Checkout.Prepare, held until the session ends and its branch is
+	// pushed with repo.Checkout.Finish.
+	Repo, Branch string
 	// Env is the agent's whole environment, KEY=VALUE.
 	Env []string
 	// Secrets are values redacted from the scrollback.
@@ -121,11 +135,14 @@ func (s StartSpec) Format(f fmt.State, _ rune) {
 // session's secrets. EndedAt is nil until the session is terminal;
 // ExitCode is the agent's exit code, 128+N for death by signal N, when
 // known; Signal names that signal. PID is the agent's, SupervisorPID its
-// supervisor's; either is 0 while unknown.
+// supervisor's; either is 0 while unknown. Repo and Branch are the
+// session's checkout, "" for none; Sync is its after-session push.
 type SessionInfo struct {
 	ID            core.SessionID
 	Mode          core.SessionMode
 	Argv          []string
+	Repo, Branch  string
+	Sync          core.SyncState
 	State         core.SessionState
 	PID           int
 	SupervisorPID int
@@ -158,11 +175,17 @@ type record struct {
 	// ScrollbackDropped is set once the scrollback was deleted to keep the
 	// total bound.
 	ScrollbackDropped bool `json:"scrollback_dropped"`
+	// Repo and Branch are the session's checkout, "" for none. Sync is
+	// pending from the start until the after-session push has run.
+	Repo   string         `json:"repo,omitempty"`
+	Branch string         `json:"branch,omitempty"`
+	Sync   core.SyncState `json:"sync,omitempty"`
 }
 
 func (r *record) info() SessionInfo {
 	return SessionInfo{
 		ID: r.SessionID, Mode: r.Mode, Argv: slices.Clone(r.Argv), State: r.State,
+		Repo: r.Repo, Branch: r.Branch, Sync: r.Sync,
 		PID: r.PID, SupervisorPID: r.SupervisorPID, StartedAt: r.StartedAt,
 		EndedAt: r.EndedAt, ExitCode: r.ExitCode, Signal: r.Signal,
 	}
@@ -179,6 +202,10 @@ type Manager struct {
 	mu       sync.Mutex
 	recs     map[core.SessionID]*record
 	watching map[core.SessionID]bool
+	// holds are the checkouts of live sessions with a repository.
+	holds map[core.SessionID]*repo.Checkout
+	// finishing marks sessions whose after-session push is running.
+	finishing map[core.SessionID]bool
 
 	kick   chan struct{} // wakes Run when a report is queued
 	ctx    context.Context
@@ -226,15 +253,21 @@ func OpenManager(ctx context.Context, cfg ManagerConfig) (*Manager, error) {
 	mctx, cancel := context.WithCancel(context.Background())
 	m := &Manager{
 		cfg: cfg, log: log,
-		recs:     map[core.SessionID]*record{},
-		watching: map[core.SessionID]bool{},
-		kick:     make(chan struct{}, 1),
-		ctx:      mctx, cancel: cancel,
+		recs:      map[core.SessionID]*record{},
+		watching:  map[core.SessionID]bool{},
+		holds:     map[core.SessionID]*repo.Checkout{},
+		finishing: map[core.SessionID]bool{},
+		kick:      make(chan struct{}, 1),
+		ctx:       mctx, cancel: cancel,
 	}
 	if err := m.load(); err != nil {
 		cancel()
 		return nil, err
 	}
+	// The checkouts of live sessions are held again before anything else can
+	// take them: no start is served before OpenManager returns, so these
+	// never wait.
+	m.rehold()
 	for _, id := range m.ids() {
 		m.reconcile(ctx, id)
 		m.mu.Lock()
@@ -261,8 +294,45 @@ func OpenManager(ctx context.Context, cfg ManagerConfig) (*Manager, error) {
 	if err := m.makeRoom(0); err != nil {
 		log.Warn("scrollback over its total bound with only live sessions left", "err", err)
 	}
+	// Sessions that ended before their push ran, under the last daemon.
+	for _, rec := range m.recs {
+		if rec.State.Terminal() && rec.Sync == core.SyncPending {
+			m.startFinish(rec)
+		}
+	}
 	m.mu.Unlock()
 	return m, nil
+}
+
+// rehold takes the checkout of every starting or running session with a
+// repository, as the last daemon held it.
+func (m *Manager) rehold() {
+	for _, id := range m.ids() {
+		m.mu.Lock()
+		rec := m.recs[id]
+		live := rec != nil && rec.Repo != "" && rec.Sync == core.SyncPending &&
+			(rec.State == core.SessionStarting || rec.State == core.SessionRunning)
+		url := ""
+		if live {
+			url = rec.Repo
+		}
+		m.mu.Unlock()
+		if !live {
+			continue
+		}
+		if m.cfg.Workspace == nil {
+			m.log.Warn("a live session has a checkout but this node has no workspace", "session", id.String())
+			continue
+		}
+		c, err := m.cfg.Workspace.Acquire(m.ctx, url)
+		if err != nil {
+			m.log.Warn("cannot hold a live session's checkout again", "session", id.String(), "err", err)
+			continue
+		}
+		m.mu.Lock()
+		m.holds[id] = c
+		m.mu.Unlock()
+	}
 }
 
 // load reads every session record under the root.
@@ -372,7 +442,25 @@ func sessionNotFound(id core.SessionID) *core.Error {
 // failed and returns the refusal. An id the node already has is a
 // core.CodeConflict error; a start the total scrollback bound has no room
 // for is core.CodeUnavailable.
+//
+// With a repository the session's checkout is acquired first, waiting for
+// any session that holds it (ctx bounds the wait), and readied; the agent
+// starts in it. A checkout that cannot be readied is a *core.Error with
+// reason sync_before_failed, an invalid repository or branch one with
+// reason usage; neither records a session. The checkout is held until the
+// session ends and its branch has been pushed.
 func (m *Manager) Start(ctx context.Context, spec StartSpec) (SessionInfo, error) {
+	if (spec.Repo == "") != (spec.Branch == "") {
+		return SessionInfo{}, core.NewError(core.CodeInvalidArgument, "a repo needs a branch and a branch needs a repo")
+	}
+	if spec.Repo != "" && m.cfg.Workspace == nil {
+		return SessionInfo{}, core.NewError(core.CodeInvalidArgument,
+			"this node keeps no checkouts; start the session without a repo").WithReason(core.ExitUsage)
+	}
+	if spec.Repo != "" {
+		// The checkout's directory stands in until it is known.
+		spec.WorkDir = m.cfg.Workspace.Root()
+	}
 	sspec := supervise.Spec{
 		SessionID:     spec.ID,
 		Mode:          spec.Mode,
@@ -388,8 +476,37 @@ func (m *Manager) Start(ctx context.Context, spec StartSpec) (SessionInfo, error
 	if err := sspec.Validate(); err != nil {
 		return SessionInfo{}, err
 	}
+	exists := func() error {
+		if _, ok := m.recs[spec.ID]; ok {
+			return &core.Error{
+				Code:    core.CodeConflict,
+				Message: fmt.Sprintf("session %s already exists on this node", spec.ID),
+				Details: map[string]string{"id": spec.ID.String()},
+			}
+		}
+		return nil
+	}
+	m.mu.Lock()
+	err := exists()
+	m.mu.Unlock()
+	if err != nil {
+		return SessionInfo{}, err
+	}
+	var co *repo.Checkout
+	if spec.Repo != "" {
+		if co, err = m.prepare(ctx, spec.Repo, spec.Branch); err != nil {
+			return SessionInfo{}, err
+		}
+		sspec.WorkDir = co.Dir()
+	}
+	release := func() {
+		if co != nil {
+			co.Release()
+		}
+	}
 	payload, err := json.Marshal(sspec)
 	if err != nil {
+		release()
 		return SessionInfo{}, err
 	}
 	now := time.Now().UTC().Round(0)
@@ -397,31 +514,37 @@ func (m *Manager) Start(ctx context.Context, spec StartSpec) (SessionInfo, error
 		Version: recordVersion, SessionID: spec.ID, CreatedAt: now, Mode: spec.Mode,
 		Argv: redactArgv(spec.Argv, spec.Secrets), State: core.SessionStarting, StartedAt: now,
 	}
+	if co != nil {
+		rec.Repo, rec.Branch, rec.Sync = spec.Repo, spec.Branch, core.SyncPending
+	}
 	dir := m.dir(spec.ID)
 
 	m.mu.Lock()
-	if _, ok := m.recs[spec.ID]; ok {
+	if err := exists(); err != nil {
 		m.mu.Unlock()
-		return SessionInfo{}, &core.Error{
-			Code:    core.CodeConflict,
-			Message: fmt.Sprintf("session %s already exists on this node", spec.ID),
-			Details: map[string]string{"id": spec.ID.String()},
-		}
+		release()
+		return SessionInfo{}, err
 	}
 	if err := m.makeRoom(1); err != nil {
 		m.mu.Unlock()
+		release()
 		return SessionInfo{}, err
 	}
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		m.mu.Unlock()
+		release()
 		return SessionInfo{}, fmt.Errorf("creating the session directory: %w", err)
 	}
 	if err := writeRecord(dir, rec); err != nil {
 		m.mu.Unlock()
+		release()
 		_ = os.RemoveAll(dir)
 		return SessionInfo{}, err
 	}
 	m.recs[spec.ID] = rec
+	if co != nil {
+		m.holds[spec.ID] = co
+	}
 	m.mu.Unlock()
 	hook("record-written")
 
@@ -436,7 +559,12 @@ func (m *Manager) Start(ctx context.Context, spec StartSpec) (SessionInfo, error
 		end := time.Now().UTC().Round(0)
 		m.mu.Lock()
 		rec.SupervisorPID = pid
+		// Nothing ran in the checkout: nothing to push.
+		if rec.Sync == core.SyncPending {
+			rec.Sync = core.SyncNone
+		}
 		m.transition(rec, core.SessionFailed, nil, "", &end)
+		m.releaseHold(spec.ID)
 		m.mu.Unlock()
 		return m.mustGet(spec.ID), err
 	}
@@ -451,6 +579,138 @@ func (m *Manager) Start(ctx context.Context, spec StartSpec) (SessionInfo, error
 	m.mu.Unlock()
 	m.watch(spec.ID)
 	return m.mustGet(spec.ID), nil
+}
+
+// prepare acquires the checkout of url and readies branch in it, and
+// returns it held. Failures are the launcher contract's: see Start.
+func (m *Manager) prepare(ctx context.Context, url, branch string) (*repo.Checkout, error) {
+	co, err := m.cfg.Workspace.Acquire(ctx, url)
+	if err != nil {
+		return nil, repoStartError(ctx, err)
+	}
+	hook("acquired")
+	if _, err := co.Prepare(ctx, branch); err != nil {
+		co.Release()
+		return nil, repoStartError(ctx, err)
+	}
+	if err := ctx.Err(); err != nil {
+		// The caller gave up while the checkout was readied: start nothing
+		// it cannot stop.
+		co.Release()
+		return nil, repoStartError(ctx, err)
+	}
+	return co, nil
+}
+
+// repoStartError is the refusal of a start whose checkout could not be
+// acquired or readied, as the host passes it on: a sync failure with
+// reason sync_before_failed and the sync reason; an invalid repository or
+// branch with reason usage; a start given up while waiting with reason
+// start_failed.
+func repoStartError(ctx context.Context, err error) error {
+	var se *repo.SyncError
+	var ce *core.Error
+	switch {
+	case errors.As(err, &se):
+		return (&core.Error{
+			Code:    core.CodeConflict,
+			Message: se.Error(),
+			Details: map[string]string{core.DetailSyncReason: string(se.Reason), "branch": se.Branch},
+		}).WithReason(core.ExitSyncBeforeFailed)
+	case errors.As(err, &ce) && ce.Code == core.CodeInvalidArgument:
+		return ce.WithReason(core.ExitUsage)
+	case ctx.Err() != nil:
+		return core.NewError(core.CodeUnavailable,
+			"the start was given up before the agent started: "+err.Error()).WithReason(core.ExitStartFailed)
+	}
+	return core.NewError(core.CodeUnavailable,
+		"the node's checkout could not be readied: "+err.Error()).WithReason(core.ExitSyncBeforeFailed)
+}
+
+// releaseHold releases the checkout held for the session with id, if any.
+// Callers hold mu.
+func (m *Manager) releaseHold(id core.SessionID) {
+	if c := m.holds[id]; c != nil {
+		delete(m.holds, id)
+		c.Release()
+	}
+}
+
+// startFinish runs the after-session push of an ended session in the
+// background, once. Callers hold mu.
+func (m *Manager) startFinish(rec *record) {
+	id := rec.SessionID
+	if m.finishing[id] || m.ctx.Err() != nil {
+		return
+	}
+	m.finishing[id] = true
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		defer func() {
+			m.mu.Lock()
+			delete(m.finishing, id)
+			m.mu.Unlock()
+		}()
+		m.finish(id)
+	}()
+}
+
+// finish pushes an ended session's branch from its checkout (ADR-0010 rule
+// 3), records the outcome as its sync, reports it, and releases the
+// checkout. A daemon closing meanwhile leaves the sync pending, for the
+// next daemon to finish.
+func (m *Manager) finish(id core.SessionID) {
+	m.mu.Lock()
+	rec := m.recs[id]
+	if rec == nil || rec.Sync != core.SyncPending {
+		m.mu.Unlock()
+		return
+	}
+	url, branch := rec.Repo, rec.Branch
+	co := m.holds[id]
+	delete(m.holds, id)
+	m.mu.Unlock()
+
+	var err error
+	if co == nil {
+		if m.cfg.Workspace == nil {
+			err = errors.New("this node keeps no checkouts")
+		} else if co, err = m.cfg.Workspace.Acquire(m.ctx, url); err != nil && m.ctx.Err() != nil {
+			return
+		}
+	}
+	if co != nil {
+		defer co.Release()
+		hook("finishing")
+		ctx, cancel := context.WithTimeout(m.ctx, finishTimeout)
+		var f repo.Finished
+		f, err = co.Finish(ctx, branch)
+		cancel()
+		if m.ctx.Err() != nil {
+			return
+		}
+		if err == nil && f.Pushed {
+			m.log.Info("session branch pushed", "session", id.String(), "branch", branch, "head", f.Head)
+		}
+	}
+	to := core.SyncDone
+	if err != nil {
+		to = core.SyncFailed
+		m.log.Warn("the session's commits could not be pushed; they are in the node's checkout",
+			"session", id.String(), "branch", branch, "err", err)
+	}
+	hook("finished")
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if rec.Sync != core.SyncPending {
+		return
+	}
+	rec.Sync = to
+	m.queue(rec)
+	if err := writeRecord(m.dir(id), rec); err != nil {
+		m.log.Error("cannot persist the session record", "session", id.String(), "err", err)
+	}
 }
 
 func (m *Manager) mustGet(id core.SessionID) SessionInfo {
@@ -706,6 +966,14 @@ func (m *Manager) transition(rec *record, to core.SessionState, code *int, signa
 		m.log.Error("cannot persist the session record", "session", rec.SessionID.String(), "err", err)
 	}
 	m.log.Info("session state", "session", rec.SessionID.String(), "state", string(to))
+	switch {
+	case to.Terminal() && rec.Sync == core.SyncPending:
+		m.startFinish(rec)
+	case to == core.SessionLost:
+		// Its agent may be gone with the supervisor: the checkout is let
+		// go unpushed, and the next Prepare pushes or refuses what is left.
+		m.releaseHold(rec.SessionID)
+	}
 	if to.Terminal() {
 		hook("ended")
 		if err := m.makeRoom(0); err != nil {
@@ -718,7 +986,7 @@ func (m *Manager) transition(rec *record, to core.SessionState, code *int, signa
 // hold mu and persist rec.
 func (m *Manager) queue(rec *record) {
 	rec.Seq++
-	r := core.SessionReport{SessionID: rec.SessionID, Seq: rec.Seq, State: rec.State}
+	r := core.SessionReport{SessionID: rec.SessionID, Seq: rec.Seq, State: rec.State, Sync: rec.Sync}
 	if rec.State.Terminal() {
 		r.EndedAt = rec.EndedAt
 		if rec.State == core.SessionExited || rec.State == core.SessionStopped {
@@ -934,6 +1202,9 @@ func (m *Manager) dropScrollback(rec *record) {
 func (m *Manager) removeIfDone(rec *record) {
 	if !rec.ScrollbackDropped || len(rec.Pending) > 0 || !(rec.State.Terminal() || rec.State == core.SessionLost) {
 		return
+	}
+	if rec.State.Terminal() && rec.Sync == core.SyncPending {
+		return // its push has yet to run
 	}
 	if err := os.RemoveAll(m.dir(rec.SessionID)); err != nil {
 		m.log.Warn("cannot remove the session directory", "session", rec.SessionID.String(), "err", err)

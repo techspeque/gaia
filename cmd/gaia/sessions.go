@@ -16,17 +16,22 @@ import (
 	"github.com/techspeque/gaia/internal/host"
 	gnet "github.com/techspeque/gaia/internal/net"
 	"github.com/techspeque/gaia/internal/node"
+	"github.com/techspeque/gaia/internal/repo"
 )
 
 // sessionsDirName is the session manager's root inside a daemon's state
-// directory.
-const sessionsDirName = "sessions"
+// directory, and workspaceDirName the node's checkouts (ADR-0010).
+const (
+	sessionsDirName  = "sessions"
+	workspaceDirName = "workspace"
+)
 
 // openSessions opens the session manager of a daemon whose state directory
 // is state, reporting to reporter, and returns it with its host-facing
-// side. The supervisor is this binary's `gaia supervise`. Agents start in
-// the user's home directory with the daemon's environment: there are no
-// credentials or checkouts yet (phase 1 plan).
+// side. The supervisor is this binary's `gaia supervise`. Agents run with
+// the daemon's environment, as there are no credentials yet (phase 1
+// plan): a session with a repository in the node's checkout of it, under
+// the state directory, any other in the user's home directory.
 func openSessions(ctx context.Context, state string, reporter node.Reporter, log *slog.Logger) (*node.Manager, *node.LocalSessions, error) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -40,12 +45,17 @@ func openSessions(ctx context.Context, state string, reporter node.Reporter, log
 	if err != nil {
 		return nil, nil, fmt.Errorf("no home directory for sessions to start in: %w", err)
 	}
+	ws, err := repo.Open(filepath.Join(abs, workspaceDirName))
+	if err != nil {
+		return nil, nil, fmt.Errorf("opening the node's checkouts: %w", err)
+	}
 	m, err := node.OpenManager(ctx, node.ManagerConfig{
 		Dir:           filepath.Join(abs, sessionsDirName),
 		Supervisor:    []string{exe, "supervise"},
 		SupervisorEnv: os.Environ(),
 		Reporter:      reporter,
 		Logger:        log,
+		Workspace:     ws,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("opening the session manager: %w", err)

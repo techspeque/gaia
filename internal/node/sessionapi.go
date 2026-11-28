@@ -25,8 +25,9 @@ import (
 type LocalSessions struct {
 	// Manager runs the sessions.
 	Manager *Manager
-	// WorkDir is the directory every agent starts in (the node user's home
-	// until node checkouts exist).
+	// WorkDir is the directory an agent started without a repository starts
+	// in (the node user's home). One with a repository starts in the node's
+	// checkout of it.
 	WorkDir string
 	// Env returns the agent's whole environment, KEY=VALUE.
 	Env func() []string
@@ -36,7 +37,7 @@ type LocalSessions struct {
 func nodeSession(info SessionInfo) core.NodeSession {
 	return core.NodeSession{
 		ID: info.ID, State: info.State, StartedAt: info.StartedAt,
-		EndedAt: info.EndedAt, ExitCode: info.ExitCode,
+		EndedAt: info.EndedAt, ExitCode: info.ExitCode, Sync: info.Sync,
 	}
 }
 
@@ -53,6 +54,7 @@ func (l *LocalSessions) StartSession(ctx context.Context, r core.NodeStartReques
 	}
 	info, err := l.Manager.Start(ctx, StartSpec{
 		ID: r.ID, Mode: r.Mode, Argv: r.Argv, WorkDir: l.WorkDir, Env: env,
+		Repo: r.Repo, Branch: r.Branch,
 	})
 	if err == nil {
 		return nodeSession(info), nil
@@ -375,19 +377,33 @@ type SessionClient struct {
 	BaseURL string
 	// Timeout bounds a start or a stop. Default: 30 s.
 	Timeout time.Duration
+	// RepoStartTimeout bounds a start with a repository, which includes
+	// waiting for the checkout and readying it. Default: RepoStartTimeout.
+	RepoStartTimeout time.Duration
 }
+
+// RepoStartTimeout is the default bound of a start with a repository: a
+// clone on first use, and the wait for a session holding the checkout.
+const RepoStartTimeout = time.Hour
 
 // StartSession asks the node to start r.
 func (c *SessionClient) StartSession(ctx context.Context, r core.NodeStartRequest) (core.NodeSession, error) {
 	var res core.NodeSessionResponse
-	err := c.call(ctx, core.NodeSessionsPath, r, &res)
+	timeout := c.Timeout
+	if r.Repo != "" {
+		timeout = c.RepoStartTimeout
+		if timeout <= 0 {
+			timeout = RepoStartTimeout
+		}
+	}
+	err := c.call(ctx, timeout, core.NodeSessionsPath, r, &res)
 	return res.Session, err
 }
 
 // StopSession asks the node to stop the session with id.
 func (c *SessionClient) StopSession(ctx context.Context, id core.SessionID) (core.NodeSession, error) {
 	var res core.NodeSessionResponse
-	err := c.call(ctx, core.NodeSessionStopPath(id), struct{}{}, &res)
+	err := c.call(ctx, c.Timeout, core.NodeSessionStopPath(id), struct{}{}, &res)
 	return res.Session, err
 }
 
@@ -411,9 +427,9 @@ func (c *SessionClient) SessionLogs(ctx context.Context, id core.SessionID, off 
 	return err
 }
 
-// call POSTs in as JSON to path and decodes a 2xx answer into out.
-func (c *SessionClient) call(ctx context.Context, path string, in, out any) error {
-	timeout := c.Timeout
+// call POSTs in as JSON to path, within timeout (30 s when 0), and decodes
+// a 2xx answer into out.
+func (c *SessionClient) call(ctx context.Context, timeout time.Duration, path string, in, out any) error {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}

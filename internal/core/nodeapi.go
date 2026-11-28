@@ -57,18 +57,24 @@ func NodeSessionStopPath(id SessionID) string { return NodeSessionPath(id) + "/s
 func NodeSessionLogsPath(id SessionID) string { return NodeSessionPath(id) + "/logs" }
 
 // NodeStartRequest is the body of a POST on NodeSessionsPath: the session
-// the host has recorded, to start under the id the host chose.
+// the host has recorded, to start under the id the host chose. Repo and
+// Branch, both set or both "", name the checkout it runs in.
 type NodeStartRequest struct {
-	ID   SessionID   `json:"id"`
-	Mode SessionMode `json:"mode"`
-	Argv []string    `json:"argv"`
+	ID     SessionID   `json:"id"`
+	Mode   SessionMode `json:"mode"`
+	Argv   []string    `json:"argv"`
+	Repo   string      `json:"repo,omitempty"`
+	Branch string      `json:"branch,omitempty"`
 }
 
 // Validate returns a CodeInvalidArgument error unless r carries an id, a
-// valid mode and a valid argv.
+// valid mode, a repo and a branch together or neither, and a valid argv.
 func (r NodeStartRequest) Validate() error {
 	if r.ID.IsZero() {
 		return NewError(CodeInvalidArgument, "start request without a session id")
+	}
+	if err := validRepoBranch(r.Repo, r.Branch); err != nil {
+		return err
 	}
 	if !r.Mode.Valid() {
 		return &Error{
@@ -82,13 +88,14 @@ func (r NodeStartRequest) Validate() error {
 
 // NodeSession is a session as a node reports it to the host in answer to a
 // start or a stop. EndedAt is set exactly for a terminal state; ExitCode
-// as in SessionReport.
+// and Sync as in SessionReport.
 type NodeSession struct {
 	ID        SessionID    `json:"id"`
 	State     SessionState `json:"state"`
 	StartedAt time.Time    `json:"started_at"`
 	EndedAt   *time.Time   `json:"ended_at"`
 	ExitCode  *int         `json:"exit_code"`
+	Sync      SyncState    `json:"sync,omitempty"`
 }
 
 // NodeSessionResponse is the body of a successful start or stop on the

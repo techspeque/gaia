@@ -315,8 +315,8 @@ func TestNodesOverTailnet(t *testing.T) {
 		for _, e := range entries {
 			names = append(names, e.Name())
 		}
-		if strings.Join(names, " ") != nameFile+" "+sessionsDirName+" tsnet" {
-			t.Errorf("node state %s holds %q, want only the name file, the sessions and tsnet", state, names)
+		if strings.Join(names, " ") != nameFile+" "+sessionsDirName+" tsnet "+workspaceDirName {
+			t.Errorf("node state %s holds %q, want only the name file, the sessions, tsnet and the workspace", state, names)
 		}
 		files := 0
 		err = filepath.WalkDir(state, func(p string, e fs.DirEntry, err error) error {

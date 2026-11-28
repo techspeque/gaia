@@ -43,10 +43,17 @@ const usage = `usage: gaia <command> [flags]
                                 the host; --name as for the host
   nodes [-o text|json]          list the machines registered with the host
   nodes remove NAME             remove a retired machine from the registry
-  run --node NODE (--detach | --interactive) [--profile P] -- ARGV...
-                                start ARGV on NODE as a session; --detach
-                                prints its id, --interactive gives it a
-                                terminal and attaches; the session runs on
+  run --node NODE [--repo URL --branch B]
+      (--wait [--detach-on-interrupt] | --detach | --interactive) -- ARGV...
+                                start ARGV on NODE as a session, with a repo
+                                in the node's checkout of it, pushed after;
+                                --wait acts as ARGV run here (launcher
+                                contract v1: output, exit code, 90-99 for
+                                Gaia's failures, stop on interrupt) and
+                                defaults the repo and branch to this
+                                checkout's; --detach prints the session id,
+                                --interactive gives it a terminal and
+                                attaches; the session runs on
   attach SESSION                show a session's terminal, recent output
                                 first; input goes to an interactive
                                 session; Ctrl-] detaches

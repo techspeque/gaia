@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"text/tabwriter"
 	"time"
 
@@ -24,6 +25,17 @@ type Env struct {
 	Client *Client
 	// Now is the clock for relative times. Default: time.Now.
 	Now func() time.Time
+	// WorkDir is the caller's working directory, whose checkout `gaia run
+	// --wait` defaults --repo and --branch from. Default: the process's.
+	WorkDir string
+	// Interrupts delivers SIGINT and SIGTERM to `gaia run --wait`. Nil: it
+	// subscribes to the process's own.
+	Interrupts <-chan os.Signal
+	// LostGrace is how long `gaia run --wait` waits for a lost session to
+	// come back before it exits 95, and Unreachable how long it keeps
+	// trying while the daemon or the node cannot be reached. Defaults:
+	// DefaultLostGrace, DefaultUnreachable.
+	LostGrace, Unreachable time.Duration
 }
 
 func (e Env) now() time.Time {

@@ -33,7 +33,8 @@ func SessionPath(id SessionID) string { return SessionsPath + "/" + id.String() 
 // Session is a session as the API returns it (OVERVIEW §2.2). NodeName is
 // the node's name when the host read the session. Profile, Repo, Branch and
 // Slice are "" when none. EndedAt is nil until the session reaches a
-// terminal state; ExitCode is nil when no exit code is known.
+// terminal state; ExitCode is nil when no exit code is known. Sync is where
+// the after-session push of a session with a repository is.
 type Session struct {
 	ID        SessionID    `json:"id"`
 	NodeID    NodeID       `json:"node_id"`
@@ -48,6 +49,7 @@ type Session struct {
 	StartedAt time.Time    `json:"started_at"`
 	EndedAt   *time.Time   `json:"ended_at"`
 	ExitCode  *int         `json:"exit_code"`
+	Sync      SyncState    `json:"sync"`
 }
 
 // ListSessionsResponse is the body of GET /api/v1/sessions, and the shape
@@ -57,8 +59,9 @@ type ListSessionsResponse struct {
 }
 
 // StartSessionRequest is the body of POST /api/v1/sessions. Node is the
-// node's name. Repo and Branch are "" to use the node's default; Profile is
-// "" for none.
+// node's name. Repo and Branch name the remote URL and branch the session
+// runs in, in the node's checkout of it; both are "" for a session in no
+// checkout (the node user's home). Profile is "" for none.
 type StartSessionRequest struct {
 	Node    string      `json:"node"`
 	Repo    string      `json:"repo,omitempty"`
@@ -69,9 +72,13 @@ type StartSessionRequest struct {
 }
 
 // Validate returns a CodeInvalidArgument error unless r names a valid node
-// and mode and carries a valid argv.
+// and mode, names a repo and a branch together or neither, and carries a
+// valid argv.
 func (r StartSessionRequest) Validate() error {
 	if err := ValidNodeName(r.Node); err != nil {
+		return err
+	}
+	if err := validRepoBranch(r.Repo, r.Branch); err != nil {
 		return err
 	}
 	if !r.Mode.Valid() {
@@ -92,6 +99,15 @@ type StartSessionResponse struct {
 // StopSessionResponse is the body of a successful stop of a session.
 type StopSessionResponse struct {
 	Session Session `json:"session"`
+}
+
+// validRepoBranch returns a CodeInvalidArgument error unless repo and branch
+// are both set or both empty. The node checks their form.
+func validRepoBranch(repo, branch string) error {
+	if (repo == "") != (branch == "") {
+		return NewError(CodeInvalidArgument, "a repo needs a branch and a branch needs a repo")
+	}
+	return nil
 }
 
 // ValidArgv returns a CodeInvalidArgument error unless argv has at least

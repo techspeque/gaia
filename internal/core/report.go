@@ -11,13 +11,15 @@ import (
 // have recorded, so the host treats a Seq it has already applied as done.
 // ExitCode is set for an exited or stopped session when the agent's exit
 // code is known (128+N for death by signal N); EndedAt is set exactly for
-// a terminal state.
+// a terminal state. Sync is the session's after-session push; a report
+// that only settles it repeats the session's terminal state.
 type SessionReport struct {
 	SessionID SessionID    `json:"session_id"`
 	Seq       uint64       `json:"seq"`
 	State     SessionState `json:"state"`
 	ExitCode  *int         `json:"exit_code"`
 	EndedAt   *time.Time   `json:"ended_at"`
+	Sync      SyncState    `json:"sync,omitempty"`
 }
 
 // Validate returns a CodeInvalidArgument error unless r names a session,
@@ -47,6 +49,10 @@ func (r SessionReport) Validate() error {
 		return bad("an exited session needs an exit code")
 	case r.ExitCode != nil && r.State != SessionExited && r.State != SessionStopped:
 		return bad("only an exited or stopped session has an exit code")
+	case !r.Sync.Valid():
+		return bad("sync " + quote(string(r.Sync)) + " is not a sync state")
+	case r.Sync.Settled() && !r.State.Terminal():
+		return bad("only an ended session has a settled sync")
 	}
 	return nil
 }

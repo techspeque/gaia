@@ -154,4 +154,31 @@ None.
 
 ## Report
 
-Filled at implementation.
+- Files: `internal/core/{sync.go,sync_test.go,session.go,nodeapi.go,report.go}`;
+  `internal/store/{session.go,session_test.go,migrations/0004_session_sync.sql}`;
+  `internal/node/{session.go,sessionapi.go,repo_test.go}`;
+  `internal/host/{session.go,session_sync_test.go}`;
+  `cmd/gaia/{sessions.go,main.go,wait_test.go,node_test.go}`;
+  `cmd/gaia/cli/{sessions.go,nodes.go,wait.go,wait_test.go}`;
+  `testdata/contract/gaia/api-v1/sessions.json` (adds `sync`).
+- `make verify`: green. `go test -race -count=1` on `cmd/gaia/cli`,
+  `internal/node`, `internal/host`, `internal/store`: ok.
+- `TestWaitContract` covers agent codes 0/1/2/3/130/137 and 90, 91, 92,
+  93 (ahead, no upstream, dirty node checkout), 94, 95, 97, 98 end to end;
+  96 and 99 in `cmd/gaia/cli` (`TestWaitVersionMismatch`,
+  `TestWaitInternal`). Warm start to first byte measured ~165 ms.
+- Decisions beyond the design list:
+  - Migration 0004 replaces the `sessions_terminal_frozen` trigger so a
+    terminal row may change `sync` only (all other columns equal), and adds
+    `sessions_sync_forward` so a settled sync never changes in SQL.
+  - The host records a report's sync even when its state move is refused
+    (conflict), so a waiting caller always learns the push outcome.
+  - The wait loop reads the session state after every log read, failed or
+    not, so a lost session (whose output cannot be read) is seen; progress
+    for the 2 min unreachable bound is output read, not host answers.
+  - A terminal session whose push is not reported within 15 min is 95.
+  - `cmd/gaia/node_test.go`: the node state directory now also holds
+    `workspace`; the expected listing is updated (owned path).
+- Observed, not changed: the existing race between the host applying a
+  start answer and the node's first report logs a dropped
+  `running -> running` conflict; it is harmless and predates this slice.

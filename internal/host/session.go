@@ -170,15 +170,21 @@ func (s *Server) GetSession(ctx context.Context, id core.SessionID) (core.Sessio
 // An unknown node is core.CodeNotFound and an offline or unreachable one
 // core.CodeUnavailable, both with reason node_unavailable and no session
 // recorded. A node that refuses the session leaves it failed (reason
-// start_failed). A request whose outcome is unknown leaves it lost, to be
-// corrected by the node's next report (reason session_lost).
+// start_failed, or the node's own reason, such as sync_before_failed). A
+// request whose outcome is unknown leaves it lost, to be corrected by the
+// node's next report (reason session_lost). Profiles do not exist yet
+// (phase 1 plan), so naming one is core.CodeNotFound with reason
+// profile_rejected and no session recorded.
 func (s *Server) StartSession(ctx context.Context, req core.StartSessionRequest) (core.Session, error) {
 	if err := req.Validate(); err != nil {
 		return core.Session{}, err
 	}
-	if req.Repo != "" || req.Branch != "" {
-		return core.Session{}, core.NewError(core.CodeInvalidArgument,
-			"repo and branch need node checkouts, which this version does not have yet; omit them")
+	if req.Profile != "" {
+		return core.Session{}, (&core.Error{
+			Code:    core.CodeNotFound,
+			Message: fmt.Sprintf("no profile named %q: profiles arrive with credentials; run without --profile", req.Profile),
+			Details: map[string]string{"profile": req.Profile},
+		}).WithReason(core.ExitProfileRejected)
 	}
 	n, ns, err := s.route(ctx, req.Node)
 	if err != nil {
@@ -189,14 +195,16 @@ func (s *Server) StartSession(ctx context.Context, req core.StartSessionRequest)
 		return core.Session{}, err
 	}
 	row := store.Session{
-		ID: id, NodeID: n.ID, Profile: req.Profile, Mode: req.Mode, Argv: req.Argv,
-		State: core.SessionStarting, StartedAt: s.opts.Now().UTC(),
+		ID: id, NodeID: n.ID, Profile: req.Profile, RepoRemote: req.Repo, Branch: req.Branch,
+		Mode: req.Mode, Argv: req.Argv, State: core.SessionStarting, StartedAt: s.opts.Now().UTC(),
 	}
 	if err := s.st.CreateSession(ctx, row); err != nil {
 		return core.Session{}, err
 	}
-	s.log.Info("session starting", "id", id.String(), "node", n.Name, "mode", string(req.Mode))
-	ns2, err := ns.StartSession(ctx, core.NodeStartRequest{ID: id, Mode: req.Mode, Argv: req.Argv})
+	s.log.Info("session starting", "id", id.String(), "node", n.Name, "mode", string(req.Mode), "branch", req.Branch)
+	ns2, err := ns.StartSession(ctx, core.NodeStartRequest{
+		ID: id, Mode: req.Mode, Argv: req.Argv, Repo: req.Repo, Branch: req.Branch,
+	})
 	if err == nil {
 		if aerr := s.apply(ctx, id, nil, ns2); aerr != nil {
 			s.log.Warn("recording a started session", "id", id.String(), "err", aerr)
@@ -233,7 +241,14 @@ func (s *Server) startFailed(ctx context.Context, id core.SessionID, n core.Node
 			// still learns that the start failed.
 			out.Code = core.CodeUnavailable
 		}
-		return out.WithReason(core.ExitStartFailed)
+		reason := core.ExitStartFailed
+		if c, ok := core.ExitCodeByName(ce.Details[core.DetailReason]); ok && nodeReasons[c] {
+			reason = c
+		}
+		if r := ce.Details[core.DetailSyncReason]; r != "" {
+			out.Details[core.DetailSyncReason] = r
+		}
+		return out.WithReason(reason)
 	default:
 		if uerr := s.st.UpdateSessionState(ctx, id, core.SessionLost); uerr != nil {
 			s.log.Warn("marking a session lost", "id", id.String(), "err", uerr)
@@ -246,6 +261,14 @@ func (s *Server) startFailed(ctx context.Context, id core.SessionID, n core.Node
 			Details: map[string]string{"node": n.Name, "id": id.String()},
 		}).WithReason(core.ExitSessionLost)
 	}
+}
+
+// nodeReasons are the reasons a node's refusal of a start may carry to the
+// caller: the start never ran its agent.
+var nodeReasons = map[core.ExitCode]bool{
+	core.ExitSyncBeforeFailed: true,
+	core.ExitStartFailed:      true,
+	core.ExitUsage:            true,
 }
 
 // endFailed moves a session that cannot be running to failed, unless the
@@ -453,7 +476,7 @@ func (s *Server) reportSession(ctx context.Context, node *core.NodeID, r core.Se
 		return core.Session{}, err
 	}
 	err := s.apply(ctx, r.SessionID, node, core.NodeSession{
-		ID: r.SessionID, State: r.State, EndedAt: r.EndedAt, ExitCode: r.ExitCode,
+		ID: r.SessionID, State: r.State, EndedAt: r.EndedAt, ExitCode: r.ExitCode, Sync: r.Sync,
 	})
 	if err != nil {
 		return core.Session{}, err
@@ -461,8 +484,9 @@ func (s *Server) reportSession(ctx context.Context, node *core.NodeID, r core.Se
 	return s.GetSession(ctx, r.SessionID)
 }
 
-// apply moves the session's row to the state ns reports. See
-// reportSession.
+// apply moves the session's row to the state and sync ns reports. See
+// reportSession. A sync that would move back (a report older than one
+// applied) is ignored.
 func (s *Server) apply(ctx context.Context, id core.SessionID, node *core.NodeID, ns core.NodeSession) error {
 	row, err := s.st.GetSession(ctx, id)
 	if err != nil {
@@ -472,9 +496,32 @@ func (s *Server) apply(ctx context.Context, id core.SessionID, node *core.NodeID
 		s.log.Warn("session report refused: the caller is not the session's node", "id", id.String(), "caller", node.String())
 		return core.NewError(core.CodeForbidden, "permission denied")
 	}
+	// The push outcome is recorded even when the state move is refused: a
+	// waiting caller needs it whichever end the host recorded.
+	stateErr := s.applyState(ctx, row, ns)
+	if stateErr != nil && !errors.Is(stateErr, core.NewError(core.CodeConflict, "")) {
+		return stateErr
+	}
+	if !row.Sync.CanMove(ns.Sync) {
+		return stateErr
+	}
+	if err := s.st.SetSessionSync(ctx, id, ns.Sync); err != nil {
+		if errors.Is(err, core.NewError(core.CodeConflict, "")) {
+			return stateErr // another report moved it first
+		}
+		return err
+	}
+	s.log.Info("session sync", "id", id.String(), "from", string(row.Sync), "to", string(ns.Sync))
+	return stateErr
+}
+
+// applyState moves row to the state ns reports.
+func (s *Server) applyState(ctx context.Context, row store.Session, ns core.NodeSession) error {
+	id := row.ID
 	if row.State == ns.State {
 		return nil
 	}
+	var err error
 	if !ns.State.Terminal() {
 		err = s.st.UpdateSessionState(ctx, id, ns.State)
 	} else {
@@ -573,6 +620,7 @@ func apiSession(row store.Session, names map[core.NodeID]string) core.Session {
 		ID: row.ID, NodeID: row.NodeID, NodeName: names[row.NodeID], Profile: row.Profile,
 		Repo: row.RepoRemote, Branch: row.Branch, Slice: row.Slice, Mode: row.Mode,
 		Argv: row.Argv, State: row.State, StartedAt: row.StartedAt, ExitCode: row.ExitCode,
+		Sync: row.Sync,
 	}
 	if !row.EndedAt.IsZero() {
 		e := row.EndedAt
