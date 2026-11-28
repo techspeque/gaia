@@ -378,6 +378,9 @@ findings:
       severity: P2
       category: behavior
       finding: 'cmd/gaia/cli/wait.go:253 — waitSession blocks inside Logs with no deadline and checks Unreachable only after that call returns; a daemon or node that stalls an open stream can hang --wait indefinitely instead of exiting 95. TestReviewStalledLogStream reproduced this with an open HTTP response: a 100ms Unreachable limit was ignored until an outer 1s cancellation. Monitor reachability independently of the blocking stream or use bounded reads/retries, preserving healthy quiet sessions and byte offsets; add a regression for a stalled stream with an unreachable session endpoint.'
-      status: open
+      status: resolved
+      resolved_by: commit 11de2c985203; test TestWaitStalledLogStream
       cycle: 1
       file: cmd/gaia/cli/wait.go
+      commit: 11de2c9852036dcddb13d994d327a0c65899fb8d
+      evidence: test TestWaitStalledLogStream
