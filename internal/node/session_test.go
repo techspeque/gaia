@@ -744,6 +744,34 @@ func TestStopRecordsStopped(t *testing.T) {
 	wantCode(t, err, core.CodeNotFound)
 }
 
+// TestStopCancelledStaysRunning: a stop whose context is already done
+// leaves a reachable session running, not lost.
+func TestStopCancelledStaysRunning(t *testing.T) {
+	h := &fakeHost{}
+	m := openManager(t, baseConfig(newRoot(t), h))
+	spec := newStart(t, "sleep:30s")
+	if _, err := m.Start(ctxT(t), spec); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := m.Stop(ctx, spec.ID); err == nil {
+		t.Fatal("stop with a cancelled context succeeded")
+	}
+	if _, err := supervise.NewClient(m.SessionDir(spec.ID)).Status(ctxT(t)); err != nil {
+		t.Fatalf("supervisor unreachable: %v", err)
+	}
+	info, err := m.Get(spec.ID)
+	if err != nil || info.State != core.SessionRunning {
+		t.Fatalf("after a cancelled stop: %+v, %v", info, err)
+	}
+	for _, r := range h.of(spec.ID) {
+		if r.State == core.SessionLost {
+			t.Fatalf("reported lost: %+v", h.of(spec.ID))
+		}
+	}
+}
+
 // TestSignalExitCode: death by signal N is exit code 128+N, state exited.
 func TestSignalExitCode(t *testing.T) {
 	m := openManager(t, baseConfig(newRoot(t), nil))

@@ -608,7 +608,8 @@ func (m *Manager) observe(ctx context.Context, id core.SessionID, created time.T
 	if err == nil {
 		return observation{state: &status.State, alive: true}
 	}
-	if !errors.Is(err, core.NewError(core.CodeUnavailable, "")) {
+	if ctx.Err() != nil || !errors.Is(err, core.NewError(core.CodeUnavailable, "")) {
+		// The caller gave up, which says nothing of the supervisor.
 		return observation{undecided: true}
 	}
 	// Unreachable: it may have just recorded the end and removed its socket.
