@@ -3,6 +3,8 @@ package host
 import (
 	"context"
 	"errors"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,6 +47,46 @@ func TestStartSessionProfileRejected(t *testing.T) {
 	}
 	if len(f.started) != 0 || len(listAll(t, s)) != 0 {
 		t.Errorf("a rejected profile reached the node or the store: %+v", f.started)
+	}
+}
+
+// TestStartSessionCredentialURL: a repository URL carrying a credential is
+// refused with reason usage before anything is stored or asked of the
+// node, and the secret appears in no stored session or API response.
+func TestStartSessionCredentialURL(t *testing.T) {
+	const secret = "SECRET-f032"
+	for _, url := range []string{
+		"https://user:" + secret + "@example.com/r.git",
+		"https://" + secret + "@example.com/r.git",
+		"ssh://git:" + secret + "@example.com/r.git",
+	} {
+		s, h, f, _ := sessionServer(t)
+		req := startReq("node-a", "claude")
+		req.Repo, req.Branch = url, "main"
+		_, err := s.StartSession(context.Background(), req)
+		if !errors.Is(err, core.NewError(core.CodeInvalidArgument, "")) || reasonOf(err) != "usage" {
+			t.Errorf("%s: %v (reason %q)", url, err, reasonOf(err))
+		}
+		if err != nil && strings.Contains(err.Error(), secret) {
+			t.Errorf("%s: the error carries the secret: %v", url, err)
+		}
+		code, body := send(t, s.Handler(), "", http.MethodPost, core.SessionsPath, req)
+		if code == http.StatusOK || strings.Contains(string(body), secret) {
+			t.Errorf("%s: HTTP start: %d %s", url, code, body)
+		}
+		if len(f.started) != 0 {
+			t.Errorf("%s: the node was asked to start %+v", url, f.started)
+		}
+		if l := listAll(t, s); len(l) != 0 {
+			t.Errorf("%s: refused start recorded %+v", url, l)
+		}
+		rows, err := s.st.ListSessions(context.Background())
+		if err != nil || len(rows) != 0 {
+			t.Errorf("%s: stored sessions %+v %v", url, rows, err)
+		}
+		if code, body := send(t, h, addrB, http.MethodGet, core.SessionsPath, nil); code != http.StatusOK || strings.Contains(string(body), secret) {
+			t.Errorf("%s: list: %d %s", url, code, body)
+		}
 	}
 }
 

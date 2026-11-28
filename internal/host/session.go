@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/techspeque/gaia/internal/core"
+	"github.com/techspeque/gaia/internal/repo"
 	"github.com/techspeque/gaia/internal/store"
 	"github.com/techspeque/gaia/internal/tty"
 )
@@ -174,10 +175,22 @@ func (s *Server) GetSession(ctx context.Context, id core.SessionID) (core.Sessio
 // request whose outcome is unknown leaves it lost, to be corrected by the
 // node's next report (reason session_lost). Profiles do not exist yet
 // (phase 1 plan), so naming one is core.CodeNotFound with reason
-// profile_rejected and no session recorded.
+// profile_rejected and no session recorded. A repository URL the node
+// would refuse, such as one carrying a credential, is
+// core.CodeInvalidArgument with reason usage and no session recorded, so
+// the URL is never stored or listed.
 func (s *Server) StartSession(ctx context.Context, req core.StartSessionRequest) (core.Session, error) {
 	if err := req.Validate(); err != nil {
 		return core.Session{}, err
+	}
+	if req.Repo != "" {
+		if err := repo.ValidateURL(req.Repo); err != nil {
+			var ce *core.Error
+			if errors.As(err, &ce) {
+				return core.Session{}, ce.WithReason(core.ExitUsage)
+			}
+			return core.Session{}, err
+		}
 	}
 	if req.Profile != "" {
 		return core.Session{}, (&core.Error{
