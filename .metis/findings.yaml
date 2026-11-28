@@ -213,6 +213,9 @@ findings:
       severity: P2
       category: correctness
       finding: 'internal/store/migrations/0003_sessions.sql:32 — INSERT OR REPLACE bypasses terminal-row freezing: with recursive_triggers off, replacing an exited row with the same id and state starting succeeds, deletes its outcome and does not fire sessions_no_delete; this violates the brief requirement that terminal rows cannot move to any state through raw SQL. Refuse replacement of existing session ids at the schema boundary and add a regression covering REPLACE against terminal rows.'
-      status: open
+      status: resolved
+      resolved_by: commit 2aad825e9d24; test TestTerminalSessionFrozenInSQL
       cycle: 1
       file: internal/store/migrations/0003_sessions.sql
+      commit: 2aad825e9d247c95aa7899c832c227229499f5e9
+      evidence: test TestTerminalSessionFrozenInSQL
