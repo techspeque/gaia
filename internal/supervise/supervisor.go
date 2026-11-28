@@ -60,14 +60,21 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err != nil {
 		return refuse(stdout, stderr, err)
 	}
+	// The agent runs: from here a lost starter or a stop signal must not
+	// end the supervisor, so the signals are handled before the ready line.
+	// Doing it after the agent started keeps SIGHUP and SIGPIPE at their
+	// defaults in the agent.
+	sigs := s.handleSignals()
 	if err := writeLine(stdout, Response{OK: true, PID: s.child.pid}); err != nil {
 		// The starter is gone; the session goes on without it.
 		s.logf("writing the ready line: %v", err)
 	}
-	return s.run()
+	return s.run(sigs)
 }
 
 func refuse(stdout, stderr io.Writer, err error) int {
+	// A starter that has gone away must not turn the refusal into SIGPIPE.
+	ignoreHangup()
 	ce := asCoreError(err)
 	fmt.Fprintf(stderr, "gaia supervise: %v\n", ce)
 	_ = writeLine(stdout, Response{Error: ce})
@@ -264,12 +271,18 @@ func (s *supervisor) logf(format string, args ...any) {
 	fmt.Fprintf(s.stderr, "gaia supervise %s: %s\n", s.spec.SessionID, fmt.Sprintf(format, args...))
 }
 
-// run serves the session until the agent has exited and the end is
-// recorded.
-func (s *supervisor) run() int {
+// handleSignals makes the supervisor immune to SIGHUP and SIGPIPE and
+// starts delivering stop signals on the returned channel.
+func (s *supervisor) handleSignals() chan os.Signal {
 	ignoreHangup()
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, stopSignals...)
+	return sigs
+}
+
+// run serves the session until the agent has exited and the end is
+// recorded. sigs is from handleSignals.
+func (s *supervisor) run(sigs chan os.Signal) int {
 	defer signal.Stop(sigs)
 	go func() {
 		for {

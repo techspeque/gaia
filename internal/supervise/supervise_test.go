@@ -741,6 +741,65 @@ func TestSupervisorOutlivesStarter(t *testing.T) {
 	}
 }
 
+// TestStarterGoneBeforeReadyLine closes the read end of the supervisor's
+// stdout before the spec arrives, so the ready line hits a broken pipe. The
+// supervisor must not die of SIGPIPE: it drains the agent's output and
+// records its exit.
+func TestStarterGoneBeforeReadyLine(t *testing.T) {
+	spec := newSpec(t, core.SessionHeadless, "sleep:300ms", "stream:5:20ms", "exit:3")
+	dir := sessionDir(t, spec.SessionID)
+	b, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := supervisorCmd(dir)
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr := &syncBuffer{}
+	cmd.Stdout = w
+	cmd.Stderr = stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	_ = r.Close() // the starter is gone before the supervisor says ready
+	if _, err := in.Write(b); err != nil {
+		t.Fatal(err)
+	}
+	_ = in.Close()
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("supervisor: %v (%v); stderr: %s", err, cmd.ProcessState, stderr)
+		}
+	case <-time.After(30 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatalf("supervisor still running; stderr: %s", stderr)
+	}
+	st, err := ReadState(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Ended() || st.ExitCode == nil || *st.ExitCode != 3 {
+		t.Fatalf("state %+v, want ended with exit 3", st)
+	}
+	sb, _ := os.ReadFile(filepath.Join(dir, ScrollbackFile))
+	if !strings.HasSuffix(string(sb), "line 5\n") {
+		t.Errorf("scrollback %q, want the agent's whole output", sb)
+	}
+	if syscall.Kill(-st.PID, 0) != syscall.ESRCH {
+		t.Error("the agent's process group outlived its supervisor")
+	}
+}
+
 func TestProtocolRefusals(t *testing.T) {
 	s := start(t, newSpec(t, core.SessionHeadless, "print:ready", "sleep:1h"))
 	s.waitFor("ready")
