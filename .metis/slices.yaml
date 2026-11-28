@@ -13,7 +13,3 @@ slices:
       reviewed: false
       review_cycles: 0
       created: ""
-      waiting:
-        reason: 'Does the node''s 500 ms gaia nodes limit apply during post-outage recovery (f-012/f-017: 10,020 ms timeout and 4,060 ms), or only at steady state? The brief and plan do not define the measurement window.'
-        since: "2026-11-28T10:37:20Z"
-        human: true
