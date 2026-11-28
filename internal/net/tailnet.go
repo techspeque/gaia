@@ -78,6 +78,11 @@ type Tailnet struct {
 
 // Join starts tsnet and returns once the node is Running on the tailnet.
 // It calls logtail.Disable first, so tsnet uploads no logs to Tailscale.
+//
+// Join sets TS_LOGS_DIR, process-wide, to the tsnet state directory.
+// Without it, tsnet's local backend picks a logs directory of its own
+// (logpolicy.LogsDir, for its socket-stats logger) and creates one such
+// as ~/.local/share/tailscale, outside Gaia's state directory. A daemon runs one tailnet client, so one value serves.
 func Join(ctx context.Context, cfg Config) (*Tailnet, error) {
 	if cfg.Dir == "" {
 		return nil, errors.New("tailnet: no state directory")
@@ -90,6 +95,9 @@ func Join(ctx context.Context, cfg Config) (*Tailnet, error) {
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("tailnet: state directory: %w", err)
+	}
+	if err := os.Setenv("TS_LOGS_DIR", dir); err != nil {
+		return nil, fmt.Errorf("tailnet: logs directory: %w", err)
 	}
 
 	logf := redactingLogf(cfg.Logf, cfg.AuthKey)
@@ -156,7 +164,7 @@ func (t *Tailnet) ListenTLS(port int) (stdnet.Listener, error) {
 			return fallback, nil
 		},
 	}
-	return tls.NewListener(l, cfg), nil
+	return tls.NewListener(addrKeepingListener{l}, cfg), nil
 }
 
 // selfSignedNames are the DNS names and IP addresses the self-signed
@@ -208,6 +216,8 @@ type PeerAddr struct {
 	// DNSName is the peer's MagicDNS name without the trailing dot, or ""
 	// when the control server gives none.
 	DNSName string
+	// Online is whether the control server reports the peer connected.
+	Online bool
 }
 
 // LookupPeer finds the peer called name in this node's view of the
@@ -241,7 +251,7 @@ func (t *Tailnet) LookupPeer(ctx context.Context, name string) (PeerAddr, error)
 				break
 			}
 		}
-		found = append(found, PeerAddr{Addr: addr, DNSName: dns})
+		found = append(found, PeerAddr{Addr: addr, DNSName: dns, Online: p.Online})
 	}
 	switch len(found) {
 	case 0:

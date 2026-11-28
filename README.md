@@ -193,18 +193,21 @@ gaia node --host gaia-studio
   behind. Any other node is refused, with the command that fixes it.
 - **State.** A node's state directory holds only the tailnet client's state
   (`<state>/tsnet`) and its name (`<state>/name`): no auth key and no
-  credentials.
+  credentials. The tailnet client writes nothing outside `<state>/tsnet`,
+  its logs directory included.
 - **Removing a machine.** `gaia nodes remove NAME` removes a retired
   machine. A node still running registers again at its next heartbeat, so
   stop `gaia node` on it first.
 
 ## Running as a service
 
-`gaia service install` runs the daemon as a service of the current user, so
-it survives logout and reboot: a systemd user unit on Linux
+`gaia service install` runs the daemon as a service of the current user,
+started for you and restarted if it fails: a systemd user unit on Linux
 (`~/.config/systemd/user/gaia.service`), a launchd agent on macOS
 (`~/Library/LaunchAgents/io.github.techspeque.gaia.plist`, logging to
 `~/Library/Logs/gaia/gaia.log`). It needs no root and never runs `sudo`.
+How it behaves at logout and reboot differs by platform; see the last
+points below.
 
 ```sh
 gaia service install host --node                     # local-only
@@ -228,7 +231,11 @@ gaia service uninstall
   directory stays.
 - On Linux, a user service stops at logout and does not start at boot
   unless lingering is on. When it is off, install prints the one command to
-  run, `loginctl enable-linger USER`; Gaia never runs it.
+  run, `loginctl enable-linger USER`; Gaia never runs it. With lingering
+  on, it survives logout and starts at boot.
+- On macOS, the launchd agent runs in your login session: it stops when you
+  log out and starts again when you next log in. After a reboot it starts
+  at your login, not at boot.
 - Windows is not supported yet.
 
 ## Footprint

@@ -310,6 +310,40 @@ func TestLookupPeerAndHasState(t *testing.T) {
 	}
 }
 
+// TestJoinWritesOnlyStateDir checks that the tailnet client keeps all its
+// files under the state directory: with HOME and the variables tsnet's
+// logs-directory choice reads pointed at an empty home, a join leaves the
+// home empty and tsnet picks no logs directory of its own.
+func TestJoinWritesOnlyStateDir(t *testing.T) {
+	if testing.Short() {
+		t.Skip("joins a local test tailnet")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("STATE_DIRECTORY", "")
+	t.Setenv("TS_LOGS_DIR", "") // restored after the test; Join sets it
+
+	control := nettest.StartControl(t, testAuthKey)
+	log := &captureLog{}
+	tn := join(t, control.HTTPTestServer.URL, "gaia-solo", testAuthKey, log)
+
+	if got := os.Getenv("TS_LOGS_DIR"); got != tn.dir {
+		t.Errorf("TS_LOGS_DIR = %q, want the tsnet state directory %q", got, tn.dir)
+	}
+	if strings.Contains(log.all(), "logpolicy: using") {
+		t.Errorf("tsnet chose a logs directory of its own:\n%s", log.all())
+	}
+	entries, err := os.ReadDir(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		t.Errorf("join created %s in HOME", filepath.Join(home, e.Name()))
+	}
+}
+
 func TestJoinNeedsDir(t *testing.T) {
 	if _, err := Join(context.Background(), Config{}); err == nil {
 		t.Error("Join without a state directory succeeded")
