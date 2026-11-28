@@ -330,6 +330,9 @@ findings:
       severity: P3
       category: tests
       finding: internal/node/sessionapi_test.go:71 — The committed brief at lines 153-156 requires a node API test for an offset before retained scrollback, but this suite only tests an offset past the end. Add a rotated-scrollback node API/SessionClient case asserting invalid_argument and the start detail for a before-start offset.
-      status: open
+      status: resolved
+      resolved_by: commit 7ac6195916bb; test TestNodeAPILogsBeforeStart
       cycle: 1
       file: internal/node/sessionapi_test.go
+      commit: 7ac6195916bbdf1d6444facd977b01634523d884
+      evidence: test TestNodeAPILogsBeforeStart
