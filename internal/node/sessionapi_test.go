@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -130,6 +131,37 @@ func TestNodeAPILogsIdleRunningAgent(t *testing.T) {
 	}
 	if info, err := m.Get(id); err != nil || info.State != core.SessionRunning {
 		t.Errorf("session %+v %v, want running", info, err)
+	}
+}
+
+// An offset rotated out of a bounded scrollback is refused with the first
+// offset still kept.
+func TestNodeAPILogsBeforeStart(t *testing.T) {
+	cfg := baseConfig(newRoot(t), nil)
+	cfg.MaxScrollback = 100
+	m := openManager(t, cfg)
+	local := &LocalSessions{Manager: m, WorkDir: t.TempDir(), Env: func() []string { return []string{"PATH=/usr/bin:/bin"} }}
+	srv := httptest.NewServer(SessionHandler(local, admitAll, nil))
+	t.Cleanup(srv.Close)
+	c := &SessionClient{HTTP: srv.Client(), BaseURL: srv.URL}
+	ctx := ctxT(t)
+
+	id := newID(t)
+	if _, err := c.StartSession(ctx, core.NodeStartRequest{ID: id, Mode: core.SessionHeadless, Argv: []string{fakeAgent, "print:" + strings.Repeat("x", 299), "exit:0"}}); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, m, id, core.SessionExited)
+	err := c.SessionLogs(ctx, id, 0, false, &bytes.Buffer{})
+	wantCode(t, err, core.CodeInvalidArgument)
+	var ce *core.Error
+	errors.As(err, &ce)
+	start, perr := strconv.ParseInt(ce.Details["start"], 10, 64)
+	if perr != nil || start <= 0 || start >= 300 {
+		t.Fatalf("detail start %q, want the first kept offset in (0, 300)", ce.Details["start"])
+	}
+	var tail bytes.Buffer
+	if err := c.SessionLogs(ctx, id, start, false, &tail); err != nil || int64(tail.Len()) != 300-start {
+		t.Errorf("logs from start %d: %d bytes, %v", start, tail.Len(), err)
 	}
 }
 
