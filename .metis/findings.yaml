@@ -306,9 +306,12 @@ findings:
       severity: P2
       category: data
       finding: 'internal/host/session.go:224 — startFailed persists the failure outcome with the canceled HTTP request context. Reproduced by canceling the context during node start and returning context.Canceled: the response reason is session_lost but the stored row remains starting, contrary to the brief. Persist post-dispatch outcome reconciliation using a bounded context independent of caller cancellation, for lost and failed outcomes, and add cancellation regression coverage.'
-      status: open
+      status: resolved
+      resolved_by: commit a8908c468485; test TestStartSessionCanceledCaller
       cycle: 1
       file: internal/host/session.go
+      commit: a8908c4684856a34761e8fe8b05e2a8c58986e30
+      evidence: test TestStartSessionCanceledCaller
     - id: f-028
       date: "2026-11-28"
       slice: phase-1-ws-1.4
