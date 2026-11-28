@@ -366,9 +366,12 @@ findings:
       severity: P1
       category: security
       finding: internal/host/session.go:198 — StartSession persists the raw repository URL before node validation; a refused https://user:SECRET@example.com/r.git remains in ListSessions/GetSession and gaia ls -o json, exposing the password (reproduced with TestReviewCredentialURL via a temporary Go overlay). Reject credential-bearing repository URLs before persisting them and add a regression asserting the secret appears in neither stored session metadata nor API responses.
-      status: open
+      status: resolved
+      resolved_by: commit e00783f1be9a; test TestStartSessionCredentialURL
       cycle: 1
       file: internal/host/session.go
+      commit: e00783f1be9a5343bcedc37a6f6090a3ff377e77
+      evidence: test TestStartSessionCredentialURL
     - id: f-033
       date: "2026-11-28"
       slice: phase-1-ws-1.7
