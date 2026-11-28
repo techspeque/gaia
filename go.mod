@@ -5,6 +5,7 @@ go 1.26.11
 tool honnef.co/go/tools/cmd/staticcheck
 
 require (
+	github.com/creack/pty v1.1.24
 	golang.org/x/sys v0.49.0
 	modernc.org/sqlite v1.63.0
 	tailscale.com v1.98.8
@@ -35,7 +36,6 @@ require (
 	github.com/coder/websocket v1.8.12 // indirect
 	github.com/coreos/go-iptables v0.7.1-0.20240112124308-65c67c9f46e6 // indirect
 	github.com/creachadair/msync v0.7.1 // indirect
-	github.com/creack/pty v1.1.24 // indirect
 	github.com/dblohm7/wingoes v0.0.0-20240119213807-a09d6be7affa // indirect
 	github.com/dgryski/go-metro v0.0.0-20180109044635-280f6062b5bc // indirect
 	github.com/digitalocean/go-smbios v0.0.0-20180907143718-390a4f403a8e // indirect

@@ -73,6 +73,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cli.Nodes(args[1:], cliEnv(stdout, stderr))
 	case "service":
 		return runService(args[1:], stdout, stderr, runtime.GOOS)
+	case "supervise":
+		return runSupervise(args[1:], stdout, stderr)
 	case "-h", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return 0

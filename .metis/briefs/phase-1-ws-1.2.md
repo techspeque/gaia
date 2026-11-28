@@ -137,7 +137,8 @@ Design decisions:
   failure, starter killed mid-session, state file contents without secrets,
   protocol refusals (headless input/resize, bad offset, unknown op).
 - `cmd/gaia/supervise_test.go`: `gaia supervise` dispatch: bad flags exit
-  98 usage; missing spec reports an error.
+  2 (usage, as `gaia host`/`gaia node`); not listed in the usage text. A
+  missing or bad spec (ok:false, exit 97) is tested on `supervise.Main`.
 
 ## Out-of-scope touches
 
@@ -145,4 +146,33 @@ None.
 
 ## Report
 
-Filled at implementation.
+- Added: `internal/supervise/` (`doc.go` replaced the placeholder,
+  `spec.go`, `redact.go`, `state.go`, `protocol.go`, `supervisor.go`,
+  `proc_unix.go`, `proc_other.go`, `redact_test.go`, `supervise_test.go`),
+  `cmd/gaia/supervise.go` (+test), `testdata/fakeagent/main.go`. Edited:
+  `cmd/gaia/main.go` (one `supervise` case), `go.mod` (`creack/pty`
+  indirect → direct; go.sum unchanged).
+- Exported for 1.3: `Main`, `Spec`, `WriteState`, `ReadState`,
+  `StateFile`/`ScrollbackFile`/`SocketFile`, `Client` (`Status`, `Stop`,
+  `Input`, `Resize`, `Stream`), `ErrStreamCut`, `NewRedactor`.
+- Tests: `TestRedactorTable`, `TestRedactorEverySplit` (every pair of cut
+  points), `TestRedactorRandom` (8000 chunkings vs `strings.ReplaceAll`),
+  `TestExitCodeRecorded` (0/3/255), `TestSignalDeathRecorded`
+  (SIGKILL/SIGTERM), `TestSecretNeverReachesScrollback` (split write with a
+  200 ms pause; scrollback, stream, state.json, stderr checked),
+  `TestStreamReconnectFromOffset` (≥3 cuts, reassembly = scrollback),
+  `TestStopKillsTermIgnoringGroup` (agent and grandchild ignore SIGTERM;
+  group empty after stop), `TestFileModesAndSocketRemoved`,
+  `TestHeadlessHasNoTerminal`, `TestInteractivePTY` (tty, initial size,
+  resize → SIGWINCH, input), `TestArgvLiteralWorkDirAndEnv`,
+  `TestStartFailureLeavesNothing`, `TestSupervisorOutlivesStarter`
+  (starter SIGKILLed, scrollback keeps growing, real exit recorded),
+  `TestProtocolRefusals`, `TestSpecFormatHidesSecrets`,
+  `TestStateFileRoundTrip`, `TestMainUsageAndBadSpec`,
+  `TestSuperviseDispatch`.
+- `make verify`: green on darwin/arm64. `go test -race -count=3
+  ./internal/supervise/`: green. `GOOS=linux go vet` and `GOOS=windows go
+  vet/build`: clean. Linux tests were not run locally (CI runs them).
+- Decision: the socket has no peer-uid check of its own (`internal/sock`
+  is a sibling leaf and cannot be imported); access is limited by the
+  0700 session directory owned by the user.
