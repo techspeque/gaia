@@ -288,3 +288,12 @@ findings:
       file: internal/node/session.go
       commit: 9a35b80073914fc3d78e805c8a6bfb1bfc90917d
       evidence: test TestStopCancelledStaysRunning
+    - id: f-026
+      date: "2026-11-28"
+      slice: phase-1-ws-1.4
+      severity: P2
+      category: behavior
+      finding: 'internal/node/sessionapi.go:109 — limitWriter returns errLimit only when a chunk exceeds the remaining snapshot, not when it exactly exhausts it. Reproduced with fakeagent print:ready sleep:1h: non-follow logs writes ready then hangs until the request deadline instead of returning. Return the limit sentinel immediately when the remaining count reaches zero and add an idle-running-agent regression test.'
+      status: open
+      cycle: 1
+      file: internal/node/sessionapi.go
