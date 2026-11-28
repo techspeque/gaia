@@ -237,9 +237,12 @@ findings:
       severity: P1
       category: behavior
       finding: 'internal/supervise/supervisor.go:63 — The ready line is written before run installs SIGPIPE protection. Reproduced by closing the stdout read end before submitting a valid sleep spec: supervisor exits on SIGPIPE (-13), leaving an unended state and unsupervised child. Install signal protection before writing readiness (and protect the error/log path), with a subprocess regression proving starter loss during readiness still drains output and records the child exit.'
-      status: open
+      status: resolved
+      resolved_by: commit 7419fca1d086; test TestStarterGoneBeforeReadyLine
       cycle: 1
       file: internal/supervise/supervisor.go
+      commit: 7419fca1d08640e30cdf9aecd729fccf78563400
+      evidence: test TestStarterGoneBeforeReadyLine
     - id: f-022
       date: "2026-11-28"
       slice: phase-1-ws-1.2
