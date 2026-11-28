@@ -67,9 +67,10 @@ Design decisions:
   - node refused after creating its record (state `failed` in the error's
     `session_state` detail) → row `failed`, reason `start_failed`;
   - node refused without a record, or the request was not delivered
-    (`ErrNotDelivered`, e.g. dial failure) → the row is deleted
-    (new `store.DeleteSession`, only for a `starting` row), reason
-    `start_failed` resp. `node_unavailable`;
+    (`ErrNotDelivered`, e.g. dial failure) → row `failed` (terminal, so it
+    never shows as one that may still run; rows are never deleted, 1.1's
+    `sessions_no_delete` trigger), reason `start_failed` resp.
+    `node_unavailable`;
   - any other transport failure (outcome unknown) → row `lost`, reason
     `session_lost`; a later report from the node corrects it.
   The work dir is the node user's home directory and the environment is the
@@ -113,7 +114,7 @@ Design decisions:
 
 ## Declared file scope
 
-- **owned_paths:** internal/core/nodeapi.go, internal/core/nodeapi_test.go, internal/host/host.go, internal/host/session.go, internal/host/session_test.go, internal/node/sessionapi.go, internal/node/sessionapi_test.go, internal/node/remote.go, internal/node/remote_test.go, internal/store/session.go, internal/store/session_test.go, internal/supervise/scrollback.go, internal/supervise/scrollback_test.go, cmd/gaia/main.go, cmd/gaia/daemon.go, cmd/gaia/node.go, cmd/gaia/sessions.go, cmd/gaia/sessions_test.go, cmd/gaia/node_test.go, cmd/gaia/cli/client.go, cmd/gaia/cli/sessions.go, cmd/gaia/cli/sessions_test.go
+- **owned_paths:** internal/core/nodeapi.go, internal/core/nodeapi_test.go, internal/host/host.go, internal/host/session.go, internal/host/session_test.go, internal/node/sessionapi.go, internal/node/sessionapi_test.go, internal/node/remote.go, internal/node/remote_test.go, internal/supervise/scrollback.go, internal/supervise/scrollback_test.go, cmd/gaia/main.go, cmd/gaia/daemon.go, cmd/gaia/node.go, cmd/gaia/sessions.go, cmd/gaia/sessions_test.go, cmd/gaia/node_test.go, cmd/gaia/cli/client.go, cmd/gaia/cli/sessions.go, cmd/gaia/cli/sessions_test.go
 - **read_only_paths:** OVERVIEW.md, .metis/adr/, .metis/plans/phase-1-plan.md, docs/contracts/launcher-v1.md, internal/core/, internal/net/, internal/node/session.go, internal/node/node.go, internal/supervise/, internal/store/, testdata/, deps_test.go, Makefile
 
 ## Definition of Done
@@ -126,7 +127,9 @@ Design decisions:
   exists and returns.
 - `gaia stop` ends a running session; `gaia ls` shows `stopped` (exit code
   143), not `failed`.
-- A start on an offline or unknown node exits 91 and leaves no session row.
+- A start on an offline or unknown node exits 91 and leaves no session row;
+  a start that cannot reach a node the host believed online leaves a
+  `failed` row, never a live one.
 - A run with empty argv exits 98 and sends nothing.
 - The same commands work with `gaia host --node` in local-only mode, with
   the tailnet trap armed (no tailnet code runs).
@@ -138,13 +141,11 @@ Design decisions:
 
 - `internal/core/nodeapi_test.go`: `NodeStartRequest.Validate`,
   `ExitCodeByName` covers every reserved code.
-- `internal/store/session_test.go`: `TestDeleteSession` (only `starting`;
-  missing is not_found).
 - `internal/supervise/scrollback_test.go`: `TestOpenScrollback` (one
   segment, two segments after rotation, offset before start refused, at
   end empty).
 - `internal/host/session_test.go` with a fake router: start happy path,
-  unknown/offline node → no row + reason, not delivered → no row, node
+  unknown/offline node → no row + reason, not delivered → failed row, node
   refusal with record → failed, ambiguous → lost, empty argv / repo set
   refused, reports (apply, repeat no-op, illegal → conflict, wrong node over
   tailnet → forbidden), stop of terminal row not routed, logs streamed and
