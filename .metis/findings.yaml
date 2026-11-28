@@ -315,3 +315,12 @@ findings:
       status: open
       cycle: 1
       file: cmd/gaia/cli/sessions.go
+    - id: f-029
+      date: "2026-11-28"
+      slice: phase-1-ws-1.4
+      severity: P3
+      category: tests
+      finding: internal/node/sessionapi_test.go:71 — The committed brief at lines 153-156 requires a node API test for an offset before retained scrollback, but this suite only tests an offset past the end. Add a rotated-scrollback node API/SessionClient case asserting invalid_argument and the start detail for a before-start offset.
+      status: open
+      cycle: 1
+      file: internal/node/sessionapi_test.go
