@@ -360,3 +360,12 @@ findings:
       file: internal/repo/checkout.go
       commit: 3e2f1f801917f21117a9f3086534fa05fa5b5d13
       evidence: test TestPrepareIgnoresFailingCheckoutHooks,TestPrepareCheckoutFailureLeavesCheckout
+    - id: f-032
+      date: "2026-11-28"
+      slice: phase-1-ws-1.7
+      severity: P1
+      category: security
+      finding: internal/host/session.go:198 — StartSession persists the raw repository URL before node validation; a refused https://user:SECRET@example.com/r.git remains in ListSessions/GetSession and gaia ls -o json, exposing the password (reproduced with TestReviewCredentialURL via a temporary Go overlay). Reject credential-bearing repository URLs before persisting them and add a regression asserting the secret appears in neither stored session metadata nor API responses.
+      status: open
+      cycle: 1
+      file: internal/host/session.go
