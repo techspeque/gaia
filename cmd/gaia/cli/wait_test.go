@@ -192,6 +192,84 @@ func TestWaitUnreachable(t *testing.T) {
 	}
 }
 
+// stalledDaemon starts a session whose log stream, at offset 0, writes
+// "out\n" and then stays open with nothing more until released or the
+// request ends; later reads write "end\n". sessionUp says whether the
+// session's state can be read.
+func stalledDaemon(t *testing.T, sessionUp func() bool, final core.Session) (*Client, chan struct{}) {
+	t.Helper()
+	d := newSessionDaemon()
+	id := core.NewSessionID([16]byte{6})
+	release := make(chan struct{})
+	d.mux.HandleFunc("POST "+core.SessionsPath, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, core.StartSessionResponse{Session: core.Session{ID: id, NodeID: testNode, State: core.SessionRunning}})
+	})
+	d.mux.HandleFunc("GET "+core.SessionLogsPath(id), func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("offset") != "0" {
+			_, _ = w.Write([]byte("end\n"))
+			return
+		}
+		_, _ = w.Write([]byte("out\n"))
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	})
+	var mu sync.Mutex
+	released := false
+	d.mux.HandleFunc("GET "+core.SessionPath(id), func(w http.ResponseWriter, _ *http.Request) {
+		if !sessionUp() {
+			gone := (&core.Error{Code: core.CodeUnavailable, Message: "node offline"}).WithReason(core.ExitNodeUnavailable)
+			writeJSON(w, http.StatusServiceUnavailable, core.ErrorResponse{Error: gone})
+			return
+		}
+		select {
+		case <-release:
+			mu.Lock()
+			released = true
+			mu.Unlock()
+		default:
+		}
+		mu.Lock()
+		s := core.Session{ID: id, NodeID: testNode, State: core.SessionRunning}
+		if released {
+			s = final
+			s.ID, s.NodeID = id, testNode
+		}
+		mu.Unlock()
+		writeJSON(w, http.StatusOK, core.GetSessionResponse{Session: s})
+	})
+	return &Client{Dir: fakeDaemon(t, d)}, release
+}
+
+// TestWaitStalledLogStream: a log stream that stays open with no output
+// while the session cannot be reached is 95 once Unreachable has passed,
+// not when the stream ends (f-033).
+func TestWaitStalledLogStream(t *testing.T) {
+	c, _ := stalledDaemon(t, func() bool { return false }, core.Session{})
+	start := time.Now()
+	code, out, errOut := runWaitCmd(c, make(chan os.Signal))
+	if code != int(core.ExitSessionLost) || out != "out\n" || !strings.Contains(errOut, "lost contact") {
+		t.Errorf("exit %d %q %q", code, out, errOut)
+	}
+	if took := time.Since(start); took < 300*time.Millisecond || took > 5*time.Second {
+		t.Errorf("gave up after %s", took)
+	}
+}
+
+// TestWaitQuietSession: a session whose stream is open and quiet for longer
+// than Unreachable, but whose state can be read, is waited for; its output
+// is written once, resuming at the right offset.
+func TestWaitQuietSession(t *testing.T) {
+	c, release := stalledDaemon(t, func() bool { return true }, ended(core.SessionExited, ip(3), core.SyncDone))
+	time.AfterFunc(time.Second, func() { close(release) })
+	code, out, errOut := runWaitCmd(c, make(chan os.Signal))
+	if code != 3 || out != "out\nend\n" {
+		t.Errorf("exit %d %q %q", code, out, errOut)
+	}
+}
+
 // TestWaitInterrupt: an interrupt during the wait stops the session and
 // exits 130; with --detach-on-interrupt it leaves it running.
 func TestWaitInterrupt(t *testing.T) {

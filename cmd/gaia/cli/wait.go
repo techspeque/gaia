@@ -5,11 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -223,9 +226,15 @@ func stopInterrupted(id core.SessionID, ints <-chan os.Signal, env Env) int {
 // returns -1 once ctx is done.
 func waitSession(ctx context.Context, id core.SessionID, env Env) int {
 	c := env.Client
-	out := markWrites{env.Stdout}
+	// lastOK is the last progress, in Unix nanoseconds: output written, a
+	// log read that ended cleanly, or a state read while a log stream is
+	// open. The stream's writes and its monitor set it concurrently.
+	var lastOK atomic.Int64
+	progress := func() { lastOK.Store(time.Now().UnixNano()) }
+	since := func() time.Duration { return time.Since(time.Unix(0, lastOK.Load())) }
+	progress()
+	out := progressWrites{markWrites{env.Stdout}, progress}
 	var off int64
-	lastOK := time.Now()
 	var lostSince, endedAt time.Time
 	pause := func() bool {
 		t := time.NewTimer(waitRetry)
@@ -237,23 +246,29 @@ func waitSession(ctx context.Context, id core.SessionID, env Env) int {
 			return true
 		}
 	}
-	unreachable := func(err error) int {
-		if time.Since(lastOK) < env.unreachable() {
-			return 0
-		}
+	lostContact := func(err error) int {
 		_, msg := classify(err, c.dir())
 		fmt.Fprintf(env.Stderr, "gaia: lost contact with session %s for %s (%s); it may still be running: gaia ls shows it, gaia attach %s follows it\n",
 			id, env.unreachable(), msg, id)
 		return int(core.ExitSessionLost)
 	}
+	unreachable := func(err error) int {
+		if since() < env.unreachable() {
+			return 0
+		}
+		return lostContact(err)
+	}
 	var sess core.Session
 	for {
 		// Follow while the session runs; once it has ended, read what the
 		// follow did not carry.
-		n, err := c.Logs(ctx, id, off, endedAt.IsZero(), out)
+		n, err, stalled := monitoredLogs(ctx, id, off, endedAt.IsZero(), out, env, progress, since)
 		off += n
 		if ctx.Err() != nil {
 			return -1
+		}
+		if stalled != nil {
+			return lostContact(stalled)
 		}
 		var se sinkError
 		if errors.As(err, &se) {
@@ -263,7 +278,7 @@ func waitSession(ctx context.Context, id core.SessionID, env Env) int {
 		// Progress is output read: a host that answers while the node
 		// cannot be reached does not count.
 		if n > 0 || err == nil {
-			lastOK = time.Now()
+			progress()
 		}
 		logErr := err
 		if logErr != nil {
@@ -316,6 +331,66 @@ func waitSession(ctx context.Context, id core.SessionID, env Env) int {
 			return -1
 		}
 	}
+}
+
+// monitoredLogs is one Logs read of the session with id from off into out,
+// with the session's state read every waitRetry while the read is open: a
+// stream that stays open with no output must not hide a session that can
+// no longer be reached. A state read that succeeds counts as progress, so a
+// healthy quiet session keeps its stream. Once no progress has been made
+// for env.unreachable() the read is cut, and stalled is the last state
+// read's error. n is the bytes written to out, so the next read resumes
+// after them.
+func monitoredLogs(ctx context.Context, id core.SessionID, off int64, follow bool, out io.Writer, env Env,
+	progress func(), since func() time.Duration) (n int64, err, stalled error) {
+	lctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		t := time.NewTicker(waitRetry)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+			}
+			_, gerr := env.Client.GetSession(lctx, id)
+			if lctx.Err() != nil {
+				return
+			}
+			if gerr == nil {
+				progress()
+				continue
+			}
+			if since() >= env.unreachable() {
+				stalled = gerr
+				cancel()
+				return
+			}
+		}
+	}()
+	n, err = env.Client.Logs(lctx, id, off, follow, out)
+	close(done)
+	wg.Wait()
+	return n, err, stalled
+}
+
+// progressWrites calls progress after each write to w that wrote bytes.
+type progressWrites struct {
+	w        io.Writer
+	progress func()
+}
+
+func (p progressWrites) Write(b []byte) (int, error) {
+	n, err := p.w.Write(b)
+	if n > 0 {
+		p.progress()
+	}
+	return n, err
 }
 
 // exitFor is the exit code of `gaia run --wait` for an ended session whose
