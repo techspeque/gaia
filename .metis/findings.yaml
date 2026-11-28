@@ -246,3 +246,12 @@ findings:
       status: open
       cycle: 1
       file: internal/supervise/supervisor.go
+    - id: f-023
+      date: "2026-11-28"
+      slice: phase-1-ws-1.2
+      severity: P3
+      category: maint
+      finding: internal/supervise/protocol.go:116 — Successful calls register a second context.AfterFunc but discard its stop function. Repeated Status/Input calls sharing a long-lived cancellable context retain callbacks and closed connections until that context ends. Return and invoke cancellation-hook cleanup when each simple call or stream finishes.
+      status: advisory
+      cycle: 1
+      file: internal/supervise/protocol.go
