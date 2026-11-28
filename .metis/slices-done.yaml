@@ -171,3 +171,16 @@ slices:
 
         Decided by the Human on 2026-11-28, as the way to stop the collision: (a) the default tailnet name a Gaia daemon asks for is gaia-<machine name>, for host and node alike, so it does not collide with the machine's own Tailscale device; (b) gaia host gains --name, as gaia node has, and gaia service install passes it through; (c) the registry name and the tailnet name stay one name, and when the control server still assigns a different name (a suffix), the daemon logs the assigned name at start, reports it in gaia nodes, and node: allowlist entries match the assigned name. README, the fixtures and the launcher contract examples follow. Existing state directories joined under an old name keep working and keep their name; say in README how to re-join under the new one.
       created: "2026-11-27"
+    - id: phase-0-gate
+      title: 'Phase 0 gate: composed-system validation'
+      type: gate
+      priority: p2
+      risk: high
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-0-plan.md
+      plan_section: Phase Gate
+      coded: true
+      reviewed: true
+      review_cycles: 0
+      created: ""
