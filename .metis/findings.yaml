@@ -143,8 +143,11 @@ findings:
       severity: P3
       category: ""
       finding: 'Gate run 1 (v0.0.1): the tailnet client creates an empty ~/.local/share/tailscale (tsnet logpolicy ''using system state directory'') outside Gaia''s state directory on the first join, although logtail is disabled (internal/net/tailnet.go:81). Harmless, but OVERVIEW 8 says the state directory is the one thing to back up and README says the node''s state is only <state>/tsnet.'
-      status: advisory
+      status: resolved
+      resolved_by: commit b67f02bed73a; test TestJoinWritesOnlyStateDir
       file: internal/net/tailnet.go
+      commit: b67f02bed73a62a60cac80c43bc60b624b36c85c
+      evidence: test TestJoinWritesOnlyStateDir
     - id: f-014
       date: "2026-11-28"
       slice: fix-0003
