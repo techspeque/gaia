@@ -194,4 +194,7 @@ findings:
       severity: P3
       category: ""
       finding: 'Gate run 2 (v0.0.2): a node whose --host still names a v0.0.1-era host device that is now offline (the stale <machine>-1 device) retries ''context deadline exceeded'' with no hint; the new refused-port hint (fix-0003) covers only a reachable device with nothing on 443. A unit written by v0.0.1 with the old --host would hit this after the host is moved to its gaia- name; README''s migration text says nodes then use the new name, which is enough if read.'
-      status: advisory
+      status: resolved
+      resolved_by: commit b67f02bed73a; test TestDialHint
+      commit: b67f02bed73a62a60cac80c43bc60b624b36c85c
+      evidence: test TestDialHint
