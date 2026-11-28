@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -22,6 +24,7 @@ func testNode(b byte, name string) Node {
 		ID:              nodeID(b),
 		Name:            name,
 		TailnetIdentity: "ident-" + name,
+		TailnetName:     name + "-1",
 		OS:              "linux",
 		Arch:            "arm64",
 		GaiaVersion:     "v0.0.1",
@@ -34,7 +37,7 @@ func testNode(b byte, name string) Node {
 func sameNode(t *testing.T, got, want Node) {
 	t.Helper()
 	if got.ID != want.ID || got.Name != want.Name || got.TailnetIdentity != want.TailnetIdentity ||
-		got.OS != want.OS || got.Arch != want.Arch || got.GaiaVersion != want.GaiaVersion ||
+		got.TailnetName != want.TailnetName || got.OS != want.OS || got.Arch != want.Arch || got.GaiaVersion != want.GaiaVersion ||
 		got.APIVersion != want.APIVersion || !got.CreatedAt.Equal(want.CreatedAt) ||
 		!got.LastSeen.Equal(want.LastSeen) {
 		t.Errorf("node = %+v, want %+v", got, want)
@@ -96,6 +99,62 @@ func TestNodeCRUD(t *testing.T) {
 	}
 	a.LastSeen = seen
 	sameNode(t, l[0], a)
+}
+
+func TestUpdateNodeTailnetName(t *testing.T) {
+	ctx := context.Background()
+	s := mustOpen(t, stateDir(t))
+	a := testNode(1, "alpha")
+	if err := s.CreateNode(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	a.TailnetName = "alpha-2"
+	if err := s.UpdateNode(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetNode(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameNode(t, got, a)
+}
+
+// TestMigrateV1NodesGainTailnetName opens a registry written at schema
+// version 1: its rows keep everything and get an empty tailnet name.
+func TestMigrateV1NodesGainTailnetName(t *testing.T) {
+	ctx := context.Background()
+	dir := stateDir(t)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	migs, err := builtinMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := rawDB(t, filepath.Join(dir, dbFileName))
+	if err := migrate(ctx, db, migs[:1], false, nil); err != nil {
+		t.Fatal(err)
+	}
+	a := testNode(1, "alpha")
+	if _, err := db.Exec(`INSERT INTO nodes (id, name, tailnet_identity, os, arch, gaia_version, api_version, created_at, last_seen)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, a.ID.String(), a.Name, a.TailnetIdentity, a.OS, a.Arch,
+		a.GaiaVersion, a.APIVersion, a.CreatedAt.UnixNano(), a.LastSeen.UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s := mustOpen(t, dir)
+	got, err := s.GetNode(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.TailnetName = ""
+	sameNode(t, got, a)
+	if v, _ := userVersion(ctx, s.r); v != SchemaVersion() || v < 2 {
+		t.Errorf("user_version = %d, want %d", v, SchemaVersion())
+	}
 }
 
 func TestNodeNotFound(t *testing.T) {

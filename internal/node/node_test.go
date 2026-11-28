@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"runtime"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -61,7 +60,7 @@ func TestRunLocalRegistersThenHeartbeats(t *testing.T) {
 	f := &fakeRegistrar{beat: make(chan struct{}, 16), forget: false}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- RunLocal(ctx, f, LocalRequest("v1"), time.Millisecond, nil) }()
+	go func() { done <- RunLocal(ctx, f, LocalRequest("gaia-box", "", "v1"), time.Millisecond, nil) }()
 	for range 3 {
 		select {
 		case <-f.beat:
@@ -82,7 +81,7 @@ func TestRunLocalReregistersOnNotFound(t *testing.T) {
 	f := &fakeRegistrar{beat: make(chan struct{}, 16), forget: true}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() { _ = RunLocal(ctx, f, LocalRequest("v1"), time.Millisecond, nil) }()
+	go func() { _ = RunLocal(ctx, f, LocalRequest("gaia-box", "", "v1"), time.Millisecond, nil) }()
 	for range 2 {
 		select {
 		case <-f.beat:
@@ -98,15 +97,15 @@ func TestRunLocalReregistersOnNotFound(t *testing.T) {
 func TestRunLocalRegisterFailure(t *testing.T) {
 	want := errors.New("store closed")
 	f := &fakeRegistrar{registerErr: want, beat: make(chan struct{}, 1)}
-	if err := RunLocal(context.Background(), f, LocalRequest("v1"), time.Millisecond, nil); !errors.Is(err, want) {
+	if err := RunLocal(context.Background(), f, LocalRequest("gaia-box", "", "v1"), time.Millisecond, nil); !errors.Is(err, want) {
 		t.Fatalf("err = %v, want %v", err, want)
 	}
 }
 
 func TestLocalRequest(t *testing.T) {
-	r := LocalRequest("v9")
+	r := LocalRequest("gaia-box", "gaia-box-1", "v9")
 	if r.TailnetIdentity != LocalIdentity || r.OS != runtime.GOOS || r.Arch != runtime.GOARCH ||
-		r.GaiaVersion != "v9" || r.APIVersion != core.APIVersion || r.Name == "" || strings.Contains(r.Name, ".") {
+		r.GaiaVersion != "v9" || r.APIVersion != core.APIVersion || r.Name != "gaia-box" || r.TailnetName != "gaia-box-1" {
 		t.Errorf("LocalRequest = %+v", r)
 	}
 }

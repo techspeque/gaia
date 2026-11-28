@@ -71,6 +71,7 @@ func runHost(args []string, stderr io.Writer, goos string) int {
 	fs.SetOutput(stderr)
 	stateFlag := fs.String("state", "", "state directory (default: "+describeDefaultState(goos)+")")
 	withNode := fs.Bool("node", false, "also run this machine as a node, in-process (local-only mode)")
+	nameFlag := fs.String("name", "", "the host's name on the tailnet, and of its own node with --node (default: the name recorded in the state directory, else gaia-<machine name>)")
 	withTailnet := fs.Bool("tailnet", false, "join a tailnet and serve the API on it over HTTPS")
 	controlURL := fs.String("control-url", "", "tailnet control server URL, Tailscale or Headscale (default: Tailscale's); needs --tailnet")
 	var allow stringList
@@ -93,6 +94,12 @@ func runHost(args []string, stderr io.Writer, goos string) int {
 		fmt.Fprintln(stderr, "gaia host: --heartbeat-interval must be at least 10ms and --missed-heartbeats at least 1")
 		return 2
 	}
+	if *nameFlag != "" {
+		if err := core.ValidNodeName(*nameFlag); err != nil {
+			fmt.Fprintf(stderr, "gaia host: --name: %s\n", err.(*core.Error).Message)
+			return 2
+		}
+	}
 	if !*withTailnet {
 		var set []string
 		fs.Visit(func(f *flag.Flag) {
@@ -112,6 +119,13 @@ func runHost(args []string, stderr io.Writer, goos string) int {
 			fmt.Fprintf(stderr, "gaia host: %v; pass --state DIR\n", err)
 			return 1
 		}
+	}
+	// Resolved before store.Open creates the state directory, which would
+	// make a new one look used before.
+	name, err := resolveName(*nameFlag, state, machineName(os.Hostname), "host")
+	if err != nil {
+		fmt.Fprintf(stderr, "gaia host: %v\n", err)
+		return 1
 	}
 
 	redactor := &logging.Redactor{}
@@ -139,6 +153,10 @@ func runHost(args []string, stderr io.Writer, goos string) int {
 			log.Error("closing the store", "err", err)
 		}
 	}()
+	if err := recordName(state, name); err != nil {
+		log.Error("cannot record the host's name", "path", state, "err", err)
+		return 1
+	}
 
 	l, err := sock.Listen(sock.Dir(), sock.Options{
 		OnDeny: func(err error) { log.Warn("local socket peer refused", "err", err) },
@@ -152,9 +170,9 @@ func runHost(args []string, stderr io.Writer, goos string) int {
 	srv := host.New(st, host.Options{Version: version, Logger: log, Allowlist: tc.allow,
 		HeartbeatInterval: *beat, MissedHeartbeats: *missed})
 	served := make(chan error, 1)
-	tailnetAddr := ""
+	tailnetAddr, tailnetName := "", ""
 	if *withTailnet {
-		tn, tl, code := startTailnet(ctx, state, tc, log)
+		tn, tl, code := startTailnet(ctx, state, name, tc, log)
 		if tn == nil {
 			if sigCtx.Err() != nil {
 				log.Info("host stopped", "exit_code", 0)
@@ -168,18 +186,20 @@ func runHost(args []string, stderr io.Writer, goos string) int {
 			}
 		}()
 		tailnetAddr = tn.Addr()
+		tailnetName = reportTailnetName(ctx, tn, name, "host", log)
 		go func() { served <- serveBoth(ctx, cancel, srv, l, tl, tn) }()
 	} else {
 		go func() { served <- srv.Serve(ctx, l) }()
 	}
-	log.Info("host started", "socket", l.Path(), "state", state, "node", *withNode,
-		"tailnet", *withTailnet, "tailnet_addr", tailnetAddr,
+	log.Info("host started", "socket", l.Path(), "state", state, "name", name, "node", *withNode,
+		"tailnet", *withTailnet, "tailnet_addr", tailnetAddr, "tailnet_name", tailnetName,
 		"heartbeat_interval", beat.String(), "missed_heartbeats", *missed)
 
 	nodeDone := make(chan error, 1)
 	if *withNode {
+		req := node.LocalRequest(name, tailnetName, version)
 		go func() {
-			nodeDone <- node.RunLocal(ctx, srv, node.LocalRequest(version), srv.HeartbeatInterval(), log)
+			nodeDone <- node.RunLocal(ctx, srv, req, srv.HeartbeatInterval(), log)
 		}()
 	}
 
@@ -279,10 +299,9 @@ func readAuthKey(file string, getenv func(string) string, unsetenv func(string) 
 	return core.NewSecret(key), 0, nil
 }
 
-// startTailnet joins the tailnet and listens for HTTPS on it. On failure it
+// startTailnet joins the tailnet, asking for hostname, and listens for HTTPS on it. On failure it
 // returns a nil Tailnet and the exit code, having logged why.
-func startTailnet(ctx context.Context, state string, tc tailnetConfig, log *slog.Logger) (*gnet.Tailnet, net.Listener, int) {
-	hostname := machineName(os.Hostname)
+func startTailnet(ctx context.Context, state, hostname string, tc tailnetConfig, log *slog.Logger) (*gnet.Tailnet, net.Listener, int) {
 	log.Info("joining the tailnet", "control_url", describeControlURL(tc.controlURL), "hostname", hostname)
 	tn, err := tailnetJoin(ctx, gnet.Config{
 		Dir:        state,
@@ -318,20 +337,6 @@ func serveBoth(ctx context.Context, cancel context.CancelFunc, srv *host.Server,
 	first := <-errs
 	cancel()
 	return errors.Join(first, <-errs)
-}
-
-// machineName is node.MachineName of the machine's hostname, the name the
-// host asks the control server for; "gaia-host" when the hostname is
-// unknown or has no usable character.
-func machineName(hostname func() (string, error)) string {
-	h, err := hostname()
-	if err != nil {
-		return "gaia-host"
-	}
-	if n := node.MachineName(h); n != "" {
-		return n
-	}
-	return "gaia-host"
 }
 
 func describeControlURL(u string) string {

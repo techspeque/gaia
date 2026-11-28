@@ -111,7 +111,10 @@ gaia host --tailnet --control-url https://headscale.example.com \
   (`<state>/tsnet`), and later starts need no auth key.
 - **Allowlist.** Every tailnet request is checked against the identity the
   control server gives the caller. An entry is a login name
-  (`you@example.com`), a tag (`tag:gaia`) or a node name (`node:laptop`).
+  (`you@example.com`), a tag (`tag:gaia`) or a node's tailnet name
+  (`node:gaia-laptop`). `node:` takes the name the control server assigned
+  the node, the `TAILNET NAME` column of `gaia nodes` and the `tailnet_name`
+  the node logs at start, never the name the node claims for itself.
   Give entries with `--allow ENTRY` (repeatable) or `--allow-file PATH`, one
   per line with `#` comments. A caller who matches no entry gets `403` and
   the host logs a warning. `--tailnet` with an empty allowlist refuses to
@@ -121,6 +124,16 @@ gaia host --tailnet --control-url https://headscale.example.com \
   none is available (Headscale, or a client using the bare tailnet address),
   it serves a self-signed certificate made on first start and kept in
   `<state>/tsnet/gaia-tls.{crt,key}`.
+- **Name.** The host asks the control server for the tailnet name
+  `gaia-<machine name>` (on a machine called `studio`, `gaia-studio`), so it
+  never collides with the machine's own Tailscale device, which already
+  holds the machine name. `--name NAME` chooses another. The name is kept
+  in `<state>/name` and reused on every later start; with `--node`, the
+  host's own node is registered under it too. Once joined, the host
+  logs the name it was given (`"msg":"tailnet name assigned"`, with
+  `tailnet_name` and `tailnet_dns_name`). If the control server still gave
+  it another name, typically with a suffix because the name was taken, it
+  also logs a warning naming the `--host` nodes must use.
 
 ## Adding a machine
 
@@ -131,18 +144,41 @@ you run it.
 
 ```sh
 # Once: join the tailnet with an auth key (as for the host).
-GAIA_AUTHKEY=tskey-auth-… gaia node --host my-host --join
+# The host runs on the machine "studio", so its tailnet name is gaia-studio.
+GAIA_AUTHKEY=tskey-auth-… gaia node --host gaia-studio --join
 
 # Every start after that needs no key.
-gaia node --host my-host
+gaia node --host gaia-studio
 ```
 
-- **`--host NAME`** is the host's tailnet name: its MagicDNS name, the first
-  label of it, or its tailnet IP. The host's allowlist must admit the node
-  (for example `--allow tag:gaia`, or `node:NAME` per machine).
-- **`--name NAME`** is the node's name in the registry and on the tailnet.
-  It defaults to the machine name. Names use `a-z`, `0-9` and `-`. Each
-  machine keeps its name: another machine cannot register under it.
+- **`--host NAME`** is the host's tailnet name, the `tailnet_name` the host
+  logs at start: `gaia-<host machine name>` unless the host was given
+  `--name`. Its full MagicDNS name and its tailnet IP work too. It is not
+  the host machine's own Tailscale name: that device runs no Gaia host, and
+  a node pointed at it logs that nothing answers on port 443. The host's
+  allowlist must admit the node (for example `--allow tag:gaia`, or
+  `node:<the node's tailnet name>` per machine).
+- **`--name NAME`** is the node's name in the registry and the tailnet name
+  it asks for. It defaults to `gaia-<machine name>` and is kept in
+  `<state>/name`. Names use `a-z`, `0-9` and `-`. Each machine keeps its
+  name: another machine cannot register under it. The node logs the tailnet
+  name it was given at start. When the control server gave it another name
+  than it asked for, the node logs a warning, `gaia nodes` shows that name
+  under `TAILNET NAME`, and the host's `node:` entry must use it.
+- **Machines set up with Gaia v0.0.1.** A state directory that joined the
+  tailnet, or (for the host) held a registry, before names were kept keeps
+  the name it had then, the machine name, and records it. To move such a
+  machine to its `gaia-` name: stop the daemon, remove the device from the
+  tailnet (admin console, or `headscale nodes delete`), delete
+  `<state>/tsnet` and `<state>/name`, and join again with an auth key
+  (`gaia node --host … --join`; for the host, keep `<state>/gaia.db`, the
+  registry, and start `gaia host --tailnet --name gaia-<machine name>` with
+  `$GAIA_AUTHKEY` set: without `--name` the kept registry makes it ask for the
+  machine name again). The new name is recorded, so later starts need no
+  `--name`. A re-joined node is a new tailnet identity and
+  registers as a new node: remove the old entry with
+  `gaia nodes remove <old name>`. Nodes then use the host's new name in
+  `--host`, and `node:` entries the nodes' new names.
 - **Heartbeats.** The host sets the interval (`gaia host
   --heartbeat-interval 10s`, the default) and marks a node `offline` after
   `--missed-heartbeats` (default 3) intervals without one. A node keeps
@@ -152,7 +188,8 @@ gaia node --host my-host
 - **Versions.** The host accepts nodes at its own API version and one
   behind. Any other node is refused, with the command that fixes it.
 - **State.** A node's state directory holds only the tailnet client's state
-  (`<state>/tsnet`): no auth key and no credentials.
+  (`<state>/tsnet`) and its name (`<state>/name`): no auth key and no
+  credentials.
 - **Removing a machine.** `gaia nodes remove NAME` removes a retired
   machine. A node still running registers again at its next heartbeat, so
   stop `gaia node` on it first.
@@ -168,11 +205,12 @@ it survives logout and reboot: a systemd user unit on Linux
 ```sh
 gaia service install host --node                     # local-only
 gaia service install host --tailnet --allow tag:gaia # a tailnet host
-gaia service install node --host my-host             # another machine
+gaia service install node --host gaia-studio         # another machine
 gaia service uninstall
 ```
 
-- The role takes the flags of `gaia host` or `gaia node`. `--join` and
+- The role takes the flags of `gaia host` or `gaia node`, `--name`
+  included. `--join` and
   `--auth-key-file` are refused: a unit never holds an auth key. For a
   tailnet host or a node, join once by hand first (see above), stop it, then
   install; install refuses a state directory with no tailnet state.

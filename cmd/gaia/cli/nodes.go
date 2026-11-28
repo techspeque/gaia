@@ -141,17 +141,22 @@ func writeNodesJSON(w io.Writer, l core.ListNodesResponse) error {
 	return enc.Encode(l)
 }
 
-// writeNodesText writes a table of nodes, one per line.
+// writeNodesText writes a table of nodes, one per line. TAILNET NAME is the
+// name the control server assigned, "-" when unknown (local-only).
 func writeNodesText(w io.Writer, l core.ListNodesResponse, now time.Time) error {
 	if len(l.Nodes) == 0 {
 		_, err := fmt.Fprintln(w, "no nodes registered")
 		return err
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tSTATE\tOS/ARCH\tVERSION\tLAST SEEN")
+	fmt.Fprintln(tw, "NAME\tTAILNET NAME\tSTATE\tOS/ARCH\tVERSION\tLAST SEEN")
 	for _, n := range l.Nodes {
-		fmt.Fprintf(tw, "%s\t%s\t%s/%s\t%s\t%s\n",
-			n.Name, n.State, n.OS, n.Arch, n.GaiaVersion, ago(now, n.LastSeen))
+		tn := n.TailnetName
+		if tn == "" {
+			tn = "-"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s/%s\t%s\t%s\n",
+			n.Name, tn, n.State, n.OS, n.Arch, n.GaiaVersion, ago(now, n.LastSeen))
 	}
 	return tw.Flush()
 }

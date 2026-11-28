@@ -15,6 +15,8 @@ gaia run --node NODE [--profile PROFILE] [--repo URL] [--branch BRANCH]
          --wait [--detach-on-interrupt] -- ARGV…
 ```
 
+- `NODE` is the node's registry name, the `NAME` column of `gaia nodes`
+  (`gaia-<machine name>` unless the node was given `--name`).
 - Everything after `--` is the agent's argv, passed unchanged, with no shell.
 - `--repo` and `--branch` default to the caller's working directory: its
   `origin` URL and its current branch.
@@ -76,7 +78,7 @@ agents:
   claude-code/opus-5-5:
     surface: claude-code
     model: claude-opus-5-5
-    launch: [gaia, run, --node, studio, --wait, --,
+    launch: [gaia, run, --node, gaia-studio, --wait, --,
              claude, -p, "{prompt}", --model, "{model}",
              --permission-mode, acceptEdits,
              --allowedTools, "Bash(metis:*)", "Bash(git:*)"]

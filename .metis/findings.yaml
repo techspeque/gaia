@@ -116,3 +116,62 @@ findings:
       status: advisory
       cycle: 1
       file: README.md
+    - id: f-011
+      date: "2026-11-27"
+      slice: phase-0-gate
+      severity: P3
+      category: ""
+      finding: 'Gate run 1 (v0.0.1): a TLS handshake failure on the host''s tailnet listener logs ''http: TLS handshake error from %!s(<nil>): remote error: tls: unknown certificate authority'' (http.Server ErrorLog via internal/host/host.go:107); the peer address is missing, so the warning cannot be tied to a device. Seen when a tailnet client without the self-signed certificate connected.'
+      status: advisory
+      file: http.Server
+    - id: f-012
+      date: "2026-11-27"
+      slice: phase-0-gate
+      severity: P3
+      category: ""
+      finding: 'Gate run 1 (v0.0.1): after the node service had been stopped about 40 s and started again, the node registered at once but the next forwarded request (gaia nodes on the node, 5 s later) and the next heartbeat both timed out (''context deadline exceeded''); it re-registered and recovered within about 16 s of start. Not reproduced on an immediate restart (25 samples, 14-15 ms each). Likely the host''s stale path to the node''s new WireGuard endpoint; worth a look before Phase 1 sessions depend on the forwarder.'
+      status: advisory
+    - id: f-013
+      date: "2026-11-27"
+      slice: phase-0-gate
+      severity: P3
+      category: ""
+      finding: 'Gate run 1 (v0.0.1): the tailnet client creates an empty ~/.local/share/tailscale (tsnet logpolicy ''using system state directory'') outside Gaia''s state directory on the first join, although logtail is disabled (internal/net/tailnet.go:81). Harmless, but OVERVIEW 8 says the state directory is the one thing to back up and README says the node''s state is only <state>/tsnet.'
+      status: advisory
+      file: internal/net/tailnet.go
+    - id: f-014
+      date: "2026-11-28"
+      slice: fix-0003
+      severity: P2
+      category: behavior
+      finding: 'cmd/gaia/node.go:242 — refusedHint matches "connection refused", but an actual tsnet dial to a peer with port 443 closed returns "connect tcp 100.64.0.1:443: connection was refused"; the required retry hint is absent (TestReviewActualTailnetRefusalHint reproduced against the local test tailnet). — Recognize the actual tsnet refusal and add a regression test using that error or a real closed tailnet port.'
+      status: resolved
+      resolved_by: commit 6d0e1097ec2e; test TestRefusedHint
+      cycle: 1
+      file: cmd/gaia/node.go
+      commit: 6d0e1097ec2edb661b145aa4fdd43ef2f9e939ae
+      evidence: test TestRefusedHint
+    - id: f-015
+      date: "2026-11-28"
+      slice: fix-0003
+      severity: P2
+      category: behavior
+      finding: cmd/gaia/name.go:83 — Any nonempty state directory is treated as a legacy install, rather than checking for prior tsnet state or a host registry as the brief requires. A never-joined directory containing only an auth-key file resolves studio instead of gaia-studio, recreating the naming collision (TestReviewFreshStateWithIncidentalFile). — Detect the specified legacy-state markers and test that unrelated files do not suppress the gaia- default.
+      status: resolved
+      resolved_by: commit b1b1f0a40cd4; test TestResolveName
+      cycle: 1
+      file: cmd/gaia/name.go
+      commit: b1b1f0a40cd49f64da196019e89d798411897e66
+      evidence: test TestResolveName
+    - id: f-016
+      date: "2026-11-28"
+      slice: fix-0003
+      severity: P2
+      category: behavior
+      finding: README.md:173 — The documented host migration deletes tsnet and name but leaves gaia.db, then restarts without --name. Legacy-name resolution therefore requests studio again, not the promised gaia-studio (TestReviewREADMEHostRejoin); nodes following the next instruction cannot reach the host by its new name. — Include an explicit --name gaia-<machine> in the host re-join command while preserving the registry, and verify the documented migration selects the new name.
+      status: resolved
+      resolved_by: commit 15aa90bb7470; test TestResolveName/host_re-join_keeps_registry
+      cycle: 1
+      file: README.md
+      commit: 15aa90bb747017d1c10ba70c651db7bcfc3ea880
+      evidence: test TestResolveName/host_re-join_keeps_registry

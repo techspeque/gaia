@@ -20,7 +20,7 @@ import (
 	"github.com/techspeque/gaia/internal/service"
 )
 
-const serviceUsage = `usage: gaia service install host [--node] [--tailnet ...] [--state DIR] ...
+const serviceUsage = `usage: gaia service install host [--name NAME] [--node] [--tailnet ...] [--state DIR] ...
        gaia service install node --host NAME [--name NAME] [--state DIR] [--control-url URL]
        gaia service uninstall
 
@@ -218,6 +218,7 @@ func parseServiceArgs(args []string, goos string, getenv func(string) string, ho
 		missed                *int
 	)
 	if sa.role == "host" {
+		nameFlag = fs.String("name", "", "the host's name on the tailnet and of its own node (default: as for gaia host)")
 		withNode = fs.Bool("node", false, "also run this machine as a node (local-only mode)")
 		withTailnet = fs.Bool("tailnet", false, "join a tailnet and serve the API on it")
 		fs.Var(&allow, "allow", "tailnet peer allowed to call the API; repeatable; needs --tailnet")
@@ -226,7 +227,7 @@ func parseServiceArgs(args []string, goos string, getenv func(string) string, ho
 		missed = fs.Int("missed-heartbeats", host.DefaultMissedHeartbeats, "heartbeats a node may miss")
 	} else {
 		hostName = fs.String("host", "", "the host's tailnet name; required")
-		nameFlag = fs.String("name", "", "this node's name (default: the machine name)")
+		nameFlag = fs.String("name", "", "this node's name (default: as for gaia node)")
 	}
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -263,6 +264,12 @@ func parseServiceArgs(args []string, goos string, getenv func(string) string, ho
 	}
 	sa.state = abs
 	sa.flags = []string{"--state=" + abs}
+	if *nameFlag != "" {
+		if err := core.ValidNodeName(*nameFlag); err != nil {
+			fmt.Fprintf(stderr, "gaia service install %s: --name: %s\n", sa.role, err.(*core.Error).Message)
+			return sa, 2
+		}
+	}
 
 	if sa.role == "node" {
 		if *hostName == "" {
@@ -271,10 +278,6 @@ func parseServiceArgs(args []string, goos string, getenv func(string) string, ho
 		}
 		sa.flags = append(sa.flags, "--host="+*hostName)
 		if *nameFlag != "" {
-			if err := core.ValidNodeName(*nameFlag); err != nil {
-				fmt.Fprintf(stderr, "gaia service install node: --name: %s\n", err.(*core.Error).Message)
-				return sa, 2
-			}
 			sa.flags = append(sa.flags, "--name="+*nameFlag)
 		}
 		if *controlURL != "" {
@@ -299,6 +302,9 @@ func parseServiceArgs(args []string, goos string, getenv func(string) string, ho
 			fmt.Fprintf(stderr, "gaia service install host: %s needs --tailnet\n", strings.Join(bad, ", "))
 			return sa, 2
 		}
+	}
+	if *nameFlag != "" {
+		sa.flags = append(sa.flags, "--name="+*nameFlag)
 	}
 	if *withNode {
 		sa.flags = append(sa.flags, "--node")

@@ -113,21 +113,22 @@ func TestNodesJSONEmpty(t *testing.T) {
 
 func TestNodesText(t *testing.T) {
 	now := time.Date(2026, 11, 27, 14, 0, 0, 0, time.UTC)
-	node := func(name string, state core.NodeState, seen time.Time) core.Node {
-		return core.Node{Name: name, State: state, OS: "linux", Arch: "arm64", GaiaVersion: "0.1.0", LastSeen: seen}
+	node := func(name, tailnetName string, state core.NodeState, seen time.Time) core.Node {
+		return core.Node{Name: name, TailnetName: tailnetName, State: state, OS: "linux", Arch: "arm64",
+			GaiaVersion: "0.1.0", LastSeen: seen}
 	}
 	l := core.ListNodesResponse{Nodes: []core.Node{
-		node("studio", core.NodeOnline, now.Add(-12*time.Second)),
-		node("build-box", core.NodeOffline, now.Add(-2*24*time.Hour)),
+		node("gaia-studio", "", core.NodeOnline, now.Add(-12*time.Second)),
+		node("gaia-build-box", "gaia-build-box-1", core.NodeOffline, now.Add(-2*24*time.Hour)),
 	}}
 	var b bytes.Buffer
 	if err := writeNodesText(&b, l, now); err != nil {
 		t.Fatal(err)
 	}
 	want := "" +
-		"NAME       STATE    OS/ARCH      VERSION  LAST SEEN\n" +
-		"studio     online   linux/arm64  0.1.0    12s ago\n" +
-		"build-box  offline  linux/arm64  0.1.0    2026-11-25T14:00:00Z\n"
+		"NAME            TAILNET NAME      STATE    OS/ARCH      VERSION  LAST SEEN\n" +
+		"gaia-studio     -                 online   linux/arm64  0.1.0    12s ago\n" +
+		"gaia-build-box  gaia-build-box-1  offline  linux/arm64  0.1.0    2026-11-25T14:00:00Z\n"
 	if b.String() != want {
 		t.Errorf("got:\n%s\nwant:\n%s", b.String(), want)
 	}

@@ -10,7 +10,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"os"
 	"runtime"
 	"strings"
 	"time"
@@ -31,28 +30,18 @@ type Registrar interface {
 }
 
 // LocalRequest describes this machine for registration as the in-process
-// node, reporting gaiaVersion.
-func LocalRequest(gaiaVersion string) core.RegisterNodeRequest {
+// node called name, the host's own name, reporting gaiaVersion.
+// tailnetName is the host's assigned tailnet name, "" in local-only mode.
+func LocalRequest(name, tailnetName, gaiaVersion string) core.RegisterNodeRequest {
 	return core.RegisterNodeRequest{
-		Name:            localName(),
+		Name:            name,
 		TailnetIdentity: LocalIdentity,
+		TailnetName:     tailnetName,
 		OS:              runtime.GOOS,
 		Arch:            runtime.GOARCH,
 		GaiaVersion:     gaiaVersion,
 		APIVersion:      core.APIVersion,
 	}
-}
-
-// localName is MachineName of the hostname, or "local".
-func localName() string {
-	h, err := os.Hostname()
-	if err != nil {
-		return "local"
-	}
-	if n := MachineName(h); n != "" {
-		return n
-	}
-	return "local"
 }
 
 // MachineName turns a hostname into a node name that passes

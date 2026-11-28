@@ -166,7 +166,9 @@ func TestNodesOverTailnet(t *testing.T) {
 	// key is TestJoinWrongAuthKeyFails's (internal/net).
 	control := nettest.StartControl(t, "")
 	url := control.HTTPTestServer.URL
-	hostName := machineName(os.Hostname)
+	// The host is started without --name, on a fresh state directory, so
+	// it asks for the default name; README's `--host` takes that name.
+	hostName := defaultName(machineName(os.Hostname), "host")
 	allowNet := allowTailnetEnv + "=1"
 	withKey := []string{allowNet, "GAIA_AUTHKEY=" + testAuthKey, "TS_AUTHKEY="}
 	noKey := []string{allowNet, "GAIA_AUTHKEY=", "TS_AUTHKEY="}
@@ -200,6 +202,16 @@ func TestNodesOverTailnet(t *testing.T) {
 	}
 	if first["node-a"].TailnetIdentity == "" || first["node-a"].TailnetIdentity == first["node-b"].TailnetIdentity {
 		t.Errorf("identities %q %q", first["node-a"].TailnetIdentity, first["node-b"].TailnetIdentity)
+	}
+	// Each node's assigned tailnet name, as WhoIs gave it to the host, and
+	// the host's own for its in-process node.
+	for name, want := range map[string]string{"node-a": "node-a", "node-b": "node-b", hostName: hostName} {
+		if got := first[name].TailnetName; got != want {
+			t.Errorf("%s tailnet_name %q, want %q", name, got, want)
+		}
+	}
+	if !logged(h.stderr.String(), `"msg":"tailnet name assigned"`, `"tailnet_name":"`+hostName+`"`) {
+		t.Errorf("the host did not log its assigned tailnet name\nstderr:\n%s", h.stderr)
 	}
 
 	// The same list through each node's forwarder, and on the host.
@@ -299,12 +311,12 @@ func TestNodesOverTailnet(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(entries) != 1 || entries[0].Name() != "tsnet" {
-			var names []string
-			for _, e := range entries {
-				names = append(names, e.Name())
-			}
-			t.Errorf("node state %s holds %q, want only tsnet", state, names)
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		if strings.Join(names, " ") != nameFile+" tsnet" {
+			t.Errorf("node state %s holds %q, want only the name file and tsnet", state, names)
 		}
 		files := 0
 		err = filepath.WalkDir(state, func(p string, e fs.DirEntry, err error) error {

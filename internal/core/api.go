@@ -34,10 +34,16 @@ type VersionResponse struct {
 }
 
 // Node is a registered machine as the API returns it (OVERVIEW §2.2).
+// Name is the name the node registered and asked the control server for;
+// TailnetName is the MagicDNS short name the control server assigned it,
+// which differs from Name when that name was taken (a suffix), and is ""
+// when unknown, as in local-only mode. `--host` and `node:` allowlist
+// entries take TailnetName.
 type Node struct {
 	ID              NodeID    `json:"id"`
 	Name            string    `json:"name"`
 	TailnetIdentity string    `json:"tailnet_identity"`
+	TailnetName     string    `json:"tailnet_name"`
 	OS              string    `json:"os"`
 	Arch            string    `json:"arch"`
 	GaiaVersion     string    `json:"gaia_version"`
@@ -52,10 +58,13 @@ type ListNodesResponse struct {
 }
 
 // RegisterNodeRequest is the body of POST /api/v1/nodes. Registering a known
-// tailnet identity again updates that node.
+// tailnet identity again updates that node. Over the tailnet the host sets
+// TailnetIdentity and TailnetName from the caller's tailnet identity and
+// ignores the body's.
 type RegisterNodeRequest struct {
 	Name            string `json:"name"`
 	TailnetIdentity string `json:"tailnet_identity"`
+	TailnetName     string `json:"tailnet_name,omitempty"`
 	OS              string `json:"os"`
 	Arch            string `json:"arch"`
 	GaiaVersion     string `json:"gaia_version"`

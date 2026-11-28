@@ -366,11 +366,42 @@ func TestDaemonRolesRefusedOnWindows(t *testing.T) {
 }
 
 func TestHostBadFlags(t *testing.T) {
-	for _, args := range [][]string{{"--bogus"}, {"extra"}} {
+	for _, args := range [][]string{{"--bogus"}, {"extra"}, {"--name", "Bad_Name"}} {
 		var errOut bytes.Buffer
 		if code := runHost(args, &errOut, "linux"); code != 2 {
 			t.Errorf("%v: exit %d, want 2", args, code)
 		}
+	}
+	var errOut bytes.Buffer
+	runHost([]string{"--name", "Bad_Name"}, &errOut, "linux")
+	if !strings.Contains(errOut.String(), "gaia host: --name: invalid node name") {
+		t.Errorf("--name Bad_Name: stderr %q", errOut.String())
+	}
+}
+
+// TestHostNameRecorded starts a local-only host with --name: its own node
+// registers under that name, and the name is recorded in the state
+// directory, so a restart without --name keeps it.
+func TestHostNameRecorded(t *testing.T) {
+	skipIfNoDaemon(t)
+	state := filepath.Join(t.TempDir(), "state")
+	for i, args := range [][]string{{"--name", "gaia-desk"}, nil} {
+		xdg := shortTempDir(t)
+		d := startDaemon(t, xdg, append([]string{"--node", "--state", state}, args...)...)
+		d.waitReady(t)
+		waitLocalOnline(t, d)
+		if n := d.nodes(t); n[0].Name != "gaia-desk" {
+			t.Errorf("start %d: node %+v, want gaia-desk", i, n[0])
+		}
+		if err := d.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+			t.Fatal(err)
+		}
+		if code := d.wait(t); code != 0 {
+			t.Fatalf("exit %d\nstderr:\n%s", code, d.stderr)
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(state, nameFile)); err != nil || string(b) != "gaia-desk\n" {
+		t.Errorf("name file %q, %v", b, err)
 	}
 }
 
