@@ -171,7 +171,7 @@ func prepare(dir string, spec Spec, stderr io.Writer) (_ *supervisor, err error)
 		SessionID: spec.SessionID,
 		PID:       c.pid,
 		Mode:      spec.Mode,
-		Argv:      spec.Argv,
+		Argv:      redactArgv(spec.Argv, spec.Secrets),
 		StartedAt: time.Now().UTC().Round(0),
 	}
 	if err = WriteState(dir, st); err != nil {
@@ -194,6 +194,18 @@ func prepare(dir string, spec Spec, stderr io.Writer) (_ *supervisor, err error)
 		childDone: make(chan struct{}),
 		endedCh:   make(chan struct{}),
 	}, nil
+}
+
+// redactArgv returns a copy of argv with every known secret replaced by
+// core.Redacted, for the state file and status. The agent runs the
+// original argv.
+func redactArgv(argv, secrets []string) []string {
+	out := make([]string, len(argv))
+	for i, a := range argv {
+		r := NewRedactor(secrets)
+		out[i] = string(append(r.Write([]byte(a)), r.Flush()...))
+	}
+	return out
 }
 
 // makeSessionDir creates dir at 0700, or accepts an existing empty

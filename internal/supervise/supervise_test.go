@@ -334,6 +334,52 @@ func TestSecretNeverReachesScrollback(t *testing.T) {
 	}
 }
 
+func TestSecretInArgvRedactedInStateAndStatus(t *testing.T) {
+	const secret = "ARGV_SECRET_0123456789"
+	spec := newSpec(t, core.SessionHeadless, "print:"+secret, "sleep:1h")
+	spec.Secrets = []string{secret}
+	s := start(t, spec)
+	// The agent ran the original argv: it printed the secret, redacted.
+	s.waitFor("[REDACTED]")
+	wantArgv := []string{fakeAgent, "print:" + core.Redacted, "sleep:1h"}
+
+	st, err := s.client.Status(ctxT(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(st.State.Argv) != fmt.Sprint(wantArgv) {
+		t.Errorf("status argv %q, want %q", st.State.Argv, wantArgv)
+	}
+	conn, err := net.Dial("unix", filepath.Join(s.dir, SocketFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.WriteString(conn, "{\"op\":\"status\"}\n")
+	rawStatus, _ := io.ReadAll(conn)
+	conn.Close()
+	state, err := os.ReadFile(filepath.Join(s.dir, StateFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopped, err := s.client.Stop(ctxT(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	final := s.wait()
+	finalFile, _ := os.ReadFile(filepath.Join(s.dir, StateFile))
+	for name, b := range map[string]string{
+		"status": string(rawStatus), "state.json": string(state), "final state.json": string(finalFile),
+		"stop status": fmt.Sprint(stopped.State.Argv), "scrollback": s.scrollback(),
+	} {
+		if strings.Contains(b, secret) {
+			t.Errorf("%s holds the secret: %s", name, b)
+		}
+	}
+	if fmt.Sprint(final.Argv) != fmt.Sprint(wantArgv) {
+		t.Errorf("state argv %q, want %q", final.Argv, wantArgv)
+	}
+}
+
 // cutWriter cancels its context once it has taken at least limit bytes.
 type cutWriter struct {
 	buf    *bytes.Buffer
