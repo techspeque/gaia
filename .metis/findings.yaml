@@ -130,7 +130,10 @@ findings:
       severity: P3
       category: ""
       finding: 'Gate run 1 (v0.0.1): after the node service had been stopped about 40 s and started again, the node registered at once but the next forwarded request (gaia nodes on the node, 5 s later) and the next heartbeat both timed out (''context deadline exceeded''); it re-registered and recovered within about 16 s of start. Not reproduced on an immediate restart (25 samples, 14-15 ms each). Likely the host''s stale path to the node''s new WireGuard endpoint; worth a look before Phase 1 sessions depend on the forwarder.'
-      status: advisory
+      status: resolved
+      resolved_by: commit 00ab815f5404; test TestRestartedPeerResumes
+      commit: 00ab815f540438a13843631d10661cbd237115a5
+      evidence: test TestRestartedPeerResumes
     - id: f-013
       date: "2026-11-27"
       slice: phase-0-gate
