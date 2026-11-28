@@ -199,6 +199,53 @@ gaia node --host gaia-studio
   machine. A node still running registers again at its next heartbeat, so
   stop `gaia node` on it first.
 
+## Running Metis agents on a node
+
+`gaia run … --wait` acts like an agent process started on this machine, so
+Metis can start any of its agents on
+any node. `metis launch` and `metis auto` both work this way. In
+`.metis/project.yaml`, prefix the agent's `launch` argv with
+`gaia run --node NODE --wait --` and set `remote: true`:
+
+```yaml
+agents:
+  claude-code/opus-5-5:
+    surface: claude-code
+    model: claude-opus-5-5
+    remote: true
+    launch: [gaia, run, --node, gaia-studio, --wait, --,
+             claude, -p, "{prompt}", --model, "{model}",
+             --permission-mode, acceptEdits,
+             --allowedTools, "Bash(metis:*)", "Bash(git:*)"]
+  codex/gpt-6-astra:
+    surface: opencode
+    model: openai/gpt-6-astra
+    remote: true
+    launch: [gaia, run, --node, gaia-laptop, --wait, --,
+             opencode, run, --model, "{model}", "{prompt}"]
+```
+
+- **`NODE`** is a name from the `NAME` column of `gaia nodes`. Each agent
+  can name a different node, so the coder and the reviewer of one slice can
+  run on different machines.
+- **`remote: true`** (Metis v0.0.25 or later) makes Metis push the current
+  branch before each session and fetch it, fast-forward only, after. Gaia
+  needs that: the agent runs in the node's own checkout of the
+  repository's `origin` at that branch. The node pushes the agent's
+  commits before `gaia run` returns, and Metis then reads the ledger from
+  them. Gaia never writes to `.metis/`.
+- **On each node** the agent CLI must be installed and signed in, and
+  `metis` and `git` must be on `PATH`. The node user needs push access to
+  the repository. Until Phase 2, a session inherits the environment of the
+  node user and gets no credentials from the host.
+- **Exit codes.** `metis launch` and `metis auto` see the agent's exit code.
+  When Gaia itself fails they see a code from 90 to 99, for example 93 when
+  the branch is not pushed or the node's checkout is dirty. The full table
+  is in [the launcher contract](docs/contracts/launcher-v1.md).
+- **Interrupts.** Ctrl-C on `metis auto` or `metis launch` stops the remote
+  session.
+- `metis launch --dry-run` prints the full `gaia run` argv.
+
 ## Running as a service
 
 `gaia service install` runs the daemon as a service of the current user,
