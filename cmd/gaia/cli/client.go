@@ -8,6 +8,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -59,6 +60,12 @@ func (c *Client) httpClient() *http.Client {
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
+	return c.httpClientTimeout(timeout)
+}
+
+// httpClientTimeout is httpClient with timeout bounding each request; 0
+// is no bound, for streams.
+func (c *Client) httpClientTimeout(timeout time.Duration) *http.Client {
 	dir := c.dir()
 	return &http.Client{
 		Timeout: timeout,
@@ -124,32 +131,57 @@ func (c *Client) RemoveNode(ctx context.Context, name string) (core.Node, error)
 // A non-2xx answer is returned as the daemon's *core.Error with the HTTP
 // status.
 func (c *Client) do(ctx context.Context, method, path string, out any) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, method, "http://gaia"+path, nil)
+	return c.send(ctx, c.httpClient(), method, path, nil, out)
+}
+
+// send sends in, when not nil, as JSON with method to path over hc and
+// decodes a 2xx body into out, as do does.
+func (c *Client) send(ctx context.Context, hc *http.Client, method, path string, in, out any) (int, error) {
+	var body io.Reader
+	if in != nil {
+		b, err := json.Marshal(in)
+		if err != nil {
+			return 0, err
+		}
+		body = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, "http://gaia"+path, body)
 	if err != nil {
 		return 0, err
 	}
-	res, err := c.httpClient().Do(req)
+	if in != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	res, err := hc.Do(req)
 	if err != nil {
 		return 0, err
 	}
 	defer res.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(res.Body, maxBody))
+	if res.StatusCode < 200 || res.StatusCode > 299 {
+		return res.StatusCode, daemonError(res, path)
+	}
+	b, err := io.ReadAll(io.LimitReader(res.Body, maxBody))
 	if err != nil {
 		return res.StatusCode, fmt.Errorf("reading the daemon's answer to %s: %w", path, err)
 	}
-	if res.StatusCode < 200 || res.StatusCode > 299 {
-		var er core.ErrorResponse
-		if json.Unmarshal(body, &er) == nil && er.Error != nil && er.Error.Code != "" {
-			return res.StatusCode, er.Error
-		}
-		return res.StatusCode, core.NewError(core.CodeInternal,
-			fmt.Sprintf("the daemon answered %s with HTTP %d", path, res.StatusCode))
-	}
-	if err := json.Unmarshal(body, out); err != nil {
+	if err := json.Unmarshal(b, out); err != nil {
 		return res.StatusCode, core.NewError(core.CodeInternal,
 			fmt.Sprintf("the daemon's answer to %s is not valid: %v", path, err))
 	}
 	return res.StatusCode, nil
+}
+
+// daemonError is the daemon's *core.Error in a non-2xx answer to path.
+func daemonError(res *http.Response, path string) error {
+	b, err := io.ReadAll(io.LimitReader(res.Body, maxBody))
+	if err != nil {
+		return fmt.Errorf("reading the daemon's answer to %s: %w", path, err)
+	}
+	var er core.ErrorResponse
+	if json.Unmarshal(b, &er) == nil && er.Error != nil && er.Error.Code != "" {
+		return er.Error
+	}
+	return core.NewError(core.CodeInternal, fmt.Sprintf("the daemon answered %s with HTTP %d", path, res.StatusCode))
 }
 
 // mismatch builds the version error for a daemon reporting d. A zero d is
@@ -208,6 +240,9 @@ func classify(err error, dir string) (core.ExitCode, string) {
 	if errors.As(err, &ce) {
 		if ce.Code == core.CodeVersionMismatch {
 			return core.ExitVersionMismatch, ce.Message
+		}
+		if c, ok := core.ExitCodeByName(ce.Details[core.DetailReason]); ok {
+			return c, ce.Message
 		}
 		return core.ExitInternal, ce.Error()
 	}

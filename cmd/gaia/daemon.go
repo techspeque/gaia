@@ -167,8 +167,19 @@ func runHost(args []string, stderr io.Writer, goos string) int {
 	}
 	defer func() { _ = l.Close() }()
 
+	router := &sessionRouter{}
 	srv := host.New(st, host.Options{Version: version, Logger: log, Allowlist: tc.allow,
-		HeartbeatInterval: *beat, MissedHeartbeats: *missed})
+		HeartbeatInterval: *beat, MissedHeartbeats: *missed, Nodes: router})
+	if *withNode {
+		mgr, local, err := openSessions(ctx, state, srv, log)
+		if err != nil {
+			log.Error("cannot start the local node's sessions", "err", err)
+			return 1
+		}
+		defer mgr.Close()
+		router.local = local
+		go mgr.Run(ctx)
+	}
 	served := make(chan error, 1)
 	tailnetAddr, tailnetName := "", ""
 	if *withTailnet {
@@ -187,7 +198,15 @@ func runHost(args []string, stderr io.Writer, goos string) int {
 		}()
 		tailnetAddr = tn.Addr()
 		tailnetName = reportTailnetName(ctx, tn, name, "host", log)
+		router.tailnet = &tailnetNodes{tn: tn}
 		go func() { served <- serveBoth(ctx, cancel, srv, l, tl, tn) }()
+		// A node that restarts must not wait 15 s for its WireGuard
+		// session to come back (fix-0004).
+		go func() {
+			if err := tn.ResumeRestartedPeers(ctx); err != nil && ctx.Err() == nil {
+				log.Warn("watching for restarted nodes stopped; a node that restarts may take about 15 s to reach the host", "err", err)
+			}
+		}()
 	} else {
 		go func() { served <- srv.Serve(ctx, l) }()
 	}

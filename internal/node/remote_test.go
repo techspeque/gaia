@@ -18,6 +18,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -236,7 +237,7 @@ func TestHandler(t *testing.T) {
 	}))
 	defer upstream.Close()
 	base, _ := url.Parse(upstream.URL)
-	h := Handler(Forwarder(base, http.DefaultTransport, "gaia-host", nil))
+	h := Handler(Forwarder(base, http.DefaultTransport, "gaia-host", nil, nil))
 
 	call := func(method, path, body string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
@@ -258,6 +259,8 @@ func TestHandler(t *testing.T) {
 		{http.MethodGet, core.VersionPath + "?x=1", ""},
 		{http.MethodDelete, core.NodePath("node-b"), ""},
 		{http.MethodPut, core.NodesPath, `{"a":1}`},
+		{http.MethodPost, core.SessionsPath, `{"node":"node-b"}`},
+		{http.MethodGet, core.SessionsPath + "/sess_x/logs?offset=3&follow=1", ""},
 	} {
 		rec := call(c.method, c.path, c.body)
 		if rec.Code != http.StatusTeapot || rec.Body.String() != `{"from":"host"}` {
@@ -275,6 +278,7 @@ func TestHandler(t *testing.T) {
 		{http.MethodPost, core.NodesPath},
 		{http.MethodPost, core.HeartbeatPath},
 		{http.MethodGet, core.HeartbeatPath},
+		{http.MethodPost, core.SessionReportsPath},
 		{http.MethodGet, "/"},
 		{http.MethodGet, "/api/v2/nodes"},
 	} {
@@ -293,7 +297,9 @@ func TestForwarderHostUnreachable(t *testing.T) {
 	down := roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("no route to host") })
 	base, _ := url.Parse("https://gaia-host")
 	var logs bytes.Buffer
-	h := Handler(Forwarder(base, down, "gaia-host", logger(&logs)))
+	ready := &Link{}
+	ready.Set(PhaseReady)
+	h := Handler(Forwarder(base, down, "gaia-host", ready, logger(&logs)))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, core.NodesPath, nil))
 	var e core.ErrorResponse
@@ -303,6 +309,167 @@ func TestForwarderHostUnreachable(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "forwarding to the host failed") {
 		t.Errorf("not logged: %s", logs.String())
+	}
+}
+
+// forward sends one GET for the node list through h and decodes an error
+// answer, timing it.
+func forward(t *testing.T, h http.Handler) (*httptest.ResponseRecorder, *core.Error, time.Duration) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	start := time.Now()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, core.NodesPath, nil))
+	took := time.Since(start)
+	var e core.ErrorResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &e)
+	return rec, e.Error, took
+}
+
+func TestForwarderRecovering(t *testing.T) {
+	// A host that takes the request and never answers: the stalled tailnet
+	// path of fix-0004.
+	release := make(chan struct{})
+	defer close(release)
+	stalled := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer stalled.Close()
+	base, _ := url.Parse(stalled.URL)
+	link := &Link{}
+	link.Set(PhaseConfirming)
+	link.Failed(errors.New("context deadline exceeded"))
+	h := Handler(Forwarder(base, http.DefaultTransport, "gaia-host", link, nil))
+
+	rec, e, took := forward(t, h)
+	if took > RecoveryWait+time.Second {
+		t.Errorf("held the caller %s, want at most about %s", took, RecoveryWait)
+	}
+	if rec.Code != http.StatusServiceUnavailable || e == nil || e.Code != core.CodeUnavailable {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	for _, want := range []string{
+		"re-establishing its connection to the host gaia-host",
+		"waiting for the host to answer its first heartbeat",
+		"did not answer within 3s",
+		"try again in a few seconds",
+	} {
+		if !strings.Contains(e.Message, want) {
+			t.Errorf("message lacks %q: %s", want, e.Message)
+		}
+	}
+	if e.Details["link"] != string(PhaseConfirming) || e.Details["host"] != "gaia-host" {
+		t.Errorf("details %v", e.Details)
+	}
+
+	// Not joined yet: the dial's own error, said with the stage, at once.
+	joining := &Link{}
+	joining.Set(PhaseJoining)
+	notJoined := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("this node has not joined the tailnet yet")
+	})
+	rec, e, took = forward(t, Handler(Forwarder(base, notJoined, "gaia-host", joining, nil)))
+	if rec.Code != http.StatusServiceUnavailable || e == nil || took > time.Second ||
+		!strings.Contains(e.Message, "re-establishing its connection to the host gaia-host (joining the tailnet") ||
+		!strings.Contains(e.Message, "has not joined the tailnet yet") {
+		t.Errorf("%s: %d %s", took, rec.Code, rec.Body)
+	}
+}
+
+func TestForwarderRecoveringAnswered(t *testing.T) {
+	// Not ready, but the host answers: the answer is passed on, and a body
+	// that streams past RecoveryWait is not cut off once headers arrived.
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "a")
+		w.(http.Flusher).Flush()
+		time.Sleep(RecoveryWait + 500*time.Millisecond)
+		_, _ = io.WriteString(w, "b")
+	}))
+	defer up.Close()
+	base, _ := url.Parse(up.URL)
+	link := &Link{}
+	link.Set(PhaseRegistering)
+	rec, _, _ := forward(t, Handler(Forwarder(base, http.DefaultTransport, "gaia-host", link, nil)))
+	if rec.Code != http.StatusOK || rec.Body.String() != "ab" {
+		t.Errorf("%d %q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestForwarderReadyUnbounded(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(RecoveryWait + 500*time.Millisecond)
+		_, _ = io.WriteString(w, `{"nodes":[]}`)
+	}))
+	defer slow.Close()
+	base, _ := url.Parse(slow.URL)
+	link := &Link{}
+	link.Set(PhaseReady)
+	rec, _, _ := forward(t, Handler(Forwarder(base, http.DefaultTransport, "gaia-host", link, nil)))
+	if rec.Code != http.StatusOK || rec.Body.String() != `{"nodes":[]}` {
+		t.Errorf("%d %s", rec.Code, rec.Body)
+	}
+}
+
+// beatHost records heartbeat times and fails them on cue.
+type beatHost struct {
+	mu       sync.Mutex
+	register time.Time
+	beats    []time.Time
+	failBeat bool
+}
+
+func (b *beatHost) Register(_ context.Context, req core.RegisterNodeRequest) (core.RegisterNodeResponse, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.register = time.Now()
+	// An interval far longer than the test: only the confirming heartbeat
+	// comes in time.
+	return core.RegisterNodeResponse{Node: core.Node{ID: id(1), Name: req.Name}, HeartbeatIntervalMS: 60_000}, nil
+}
+
+func (b *beatHost) Heartbeat(context.Context, core.HeartbeatRequest) (core.HeartbeatResponse, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.beats = append(b.beats, time.Now())
+	if b.failBeat {
+		b.failBeat = false
+		return core.HeartbeatResponse{}, errDown
+	}
+	return core.HeartbeatResponse{}, nil
+}
+
+func TestRunLinkPhases(t *testing.T) {
+	b := &beatHost{failBeat: true}
+	var phases []Phase // under link.mu
+	link := &Link{}
+	link.onSet = func(p Phase) { phases = append(phases, p) }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, RunConfig{Host: b, Request: Request("n", "v1"), ConfirmAfter: 50 * time.Millisecond,
+			MinBackoff: time.Millisecond, Link: link})
+	}()
+	waitFor(t, "the link to be ready", link.Ready)
+	cancel()
+	<-done
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.beats) != 2 {
+		t.Fatalf("%d heartbeats, want 2 (one failed, one confirming)", len(b.beats))
+	}
+	// The first heartbeat after the second registration came after
+	// ConfirmAfter, not the 60 s interval.
+	if gap := b.beats[1].Sub(b.register); gap < 50*time.Millisecond || gap > 2*time.Second {
+		t.Errorf("confirming heartbeat %s after registration", gap)
+	}
+	// A failed heartbeat goes back to registering; an answered one is ready.
+	want := []Phase{PhaseRegistering, PhaseConfirming, PhaseRegistering, PhaseConfirming, PhaseReady}
+	if s := link.State(); !slices.Equal(phases, want) || s.LastErr != nil {
+		t.Errorf("phases %v (last error %v), want %v and no error", phases, s.LastErr, want)
 	}
 }
 
@@ -399,5 +566,24 @@ func TestRequest(t *testing.T) {
 	r := Request("node-a", "v2")
 	if r.Name != "node-a" || r.TailnetIdentity != "" || r.APIVersion != core.APIVersion || r.GaiaVersion != "v2" {
 		t.Errorf("Request = %+v", r)
+	}
+}
+
+// TestClientReportSession: a report reaches a real host as the calling
+// peer's; before that peer registers, the host refuses it as retryable.
+func TestClientReportSession(t *testing.T) {
+	_, c := startHost(t, host.Options{})
+	ctx := context.Background()
+	r := core.SessionReport{SessionID: core.NewSessionID([16]byte{1}), Seq: 1, State: core.SessionRunning}
+	err := c.ReportSession(ctx, r)
+	if !errors.Is(err, core.NewError(core.CodeUnavailable, "")) || finalRefusal(err) {
+		t.Fatalf("report before registering: %v, want a retryable unavailable", err)
+	}
+	if _, err := c.Register(ctx, Request("node-a", "v1.2.3")); err != nil {
+		t.Fatal(err)
+	}
+	// Registered, but the host has no such session: a final refusal.
+	if err := c.ReportSession(ctx, r); !finalRefusal(err) {
+		t.Fatalf("report of an unknown session: %v, want a final refusal", err)
 	}
 }

@@ -43,6 +43,24 @@ const usage = `usage: gaia <command> [flags]
                                 the host; --name as for the host
   nodes [-o text|json]          list the machines registered with the host
   nodes remove NAME             remove a retired machine from the registry
+  run --node NODE [--repo URL --branch B]
+      (--wait [--detach-on-interrupt] | --detach | --interactive) -- ARGV...
+                                start ARGV on NODE as a session, with a repo
+                                in the node's checkout of it, pushed after;
+                                --wait acts as ARGV run here (launcher
+                                contract v1: output, exit code, 90-99 for
+                                Gaia's failures, stop on interrupt) and
+                                defaults the repo and branch to this
+                                checkout's; --detach prints the session id,
+                                --interactive gives it a terminal and
+                                attaches; the session runs on
+  attach SESSION                show a session's terminal, recent output
+                                first; input goes to an interactive
+                                session; Ctrl-] detaches
+  ls [-o text|json]             list the sessions the host knows
+  stop SESSION                  stop a session (SIGTERM, SIGKILL after 10s)
+  logs SESSION [-f|--follow]    print a session's output; --follow until
+                                the session ends
   service install (host [--node] [--tailnet ...] | node --host NAME)
                                 run the daemon as a user service (systemd
                                 user unit or launchd agent) and start it
@@ -71,8 +89,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runNode(args[1:], stderr, runtime.GOOS)
 	case "nodes":
 		return cli.Nodes(args[1:], cliEnv(stdout, stderr))
+	case "run":
+		return cli.Run(args[1:], cliEnv(stdout, stderr))
+	case "attach":
+		return cli.Attach(args[1:], cliEnv(stdout, stderr))
+	case "ls":
+		return cli.Ls(args[1:], cliEnv(stdout, stderr))
+	case "stop":
+		return cli.Stop(args[1:], cliEnv(stdout, stderr))
+	case "logs":
+		return cli.Logs(args[1:], cliEnv(stdout, stderr))
 	case "service":
 		return runService(args[1:], stdout, stderr, runtime.GOOS)
+	case "supervise":
+		return runSupervise(args[1:], stdout, stderr)
 	case "-h", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return 0
@@ -83,9 +113,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 // cliEnv is the environment of the client commands: the default runtime
-// directory and this binary's API and Gaia versions.
+// directory, this binary's API and Gaia versions, and the process's
+// standard input and its terminal, if any.
 func cliEnv(stdout, stderr io.Writer) cli.Env {
-	return cli.Env{Stdout: stdout, Stderr: stderr, Client: &cli.Client{Version: version}}
+	return cli.Env{
+		Stdout: stdout, Stderr: stderr,
+		Stdin: os.Stdin, Term: cli.StdinTerminal(),
+		Client: &cli.Client{Version: version},
+	}
 }
 
 // versionString formats the one-line --version output.

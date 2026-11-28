@@ -184,3 +184,143 @@ slices:
       reviewed: true
       review_cycles: 0
       created: ""
+    - id: fix-0004
+      title: 'A node returning from an outage stalls: gaia nodes times out for about 15 s after re-registration'
+      type: fix
+      priority: p0
+      risk: high
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-0-plan.md
+      plan_section: 'Workstream 0.7: Node role, registration and heartbeat'
+      coded: true
+      reviewed: true
+      review_cycles: 0
+      notes: 'Findings f-012 and f-017, from the Phase 0 gate on two real machines (v0.0.1 and v0.0.2), reproduced three times. After the node (process or user service) had been down 40-45 s and started again, it registered at once, then the next heartbeat and the next forwarded request timed out: gaia nodes on the node at 11 s after start exited 99 after 10,020 ms (''context deadline exceeded''), at 16 s took 4,060 ms, from 17 s on 14-15 ms. Node log: ''heartbeat failed; registering again'' 15 s after the first registration. Not seen on an immediate restart. Suspected cause, unproven: the host keeps a stale path to the node''s previous WireGuard endpoint. Find the cause first and state it with evidence. The Human decided on 2026-11-28 that recovery after an outage may take up to 30 s and that the 500 ms limit is for steady state; within that bound, make recovery prompt and make it legible: a forwarded request during recovery must not hold the caller for the full timeout with a bare ''context deadline exceeded'' when the daemon can know it is still re-establishing; say what is happening. Add a test that reproduces the outage with the test control server if the cause can be reproduced there; if it only shows on real machines, say so and give the manual check. Later phases run sessions through this forwarder, so do not paper over it with a longer timeout.'
+      created: "2026-11-28"
+    - id: fix-0005
+      title: 'Four small advisories from the Phase 0 gate: stale-host hint, TLS error log, tailnet state directory, macOS service wording'
+      type: fix
+      priority: p1
+      risk: low
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-0-plan.md
+      plan_section: 'Workstream 0.7: Node role, registration and heartbeat'
+      coded: true
+      reviewed: true
+      review_cycles: 0
+      notes: 'Advisories f-018, f-011, f-013 and f-010. (1) f-018: a node whose --host names a tailnet device that exists but is offline retries ''context deadline exceeded'' with no hint; fix-0003''s hint covers only a reachable device with nothing on port 443. Give a hint for this case too, naming the device and saying it is offline or not a Gaia host. (2) f-011: a TLS handshake failure on the host''s tailnet listener logs ''http: TLS handshake error from %!s(<nil>)'' (http.Server ErrorLog, internal/host/host.go:107): the peer address is missing; log the peer so the warning can be tied to a device. (3) f-013: the tailnet client logs ''using system state directory'' and creates an empty ~/.local/share/tailscale outside Gaia''s state directory on first join, though log upload is disabled (internal/net/tailnet.go:81); keep everything inside the state directory, or if tsnet gives no way, say so in README where it lists what the state directory holds. (4) f-010: README.md:162 says the service survives logout and reboot, which is too broad for the macOS LaunchAgent, which runs in the login session; state the macOS behaviour at logout and next login, keeping the LaunchAgent mechanism. Resolve each finding with its evidence.'
+      created: "2026-11-28"
+    - id: phase-1-ws-1.1
+      title: Session model, store and API types
+      type: feat
+      priority: p2
+      risk: medium
+      stage: sessions
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-1-plan.md
+      plan_section: §1.1
+      coded: true
+      reviewed: true
+      review_cycles: 1
+      created: ""
+    - id: phase-1-ws-1.2
+      title: Session supervisor
+      type: feat
+      priority: p2
+      risk: high
+      stage: sessions
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-1-plan.md
+      plan_section: §1.2
+      coded: true
+      reviewed: true
+      review_cycles: 1
+      created: ""
+    - id: phase-1-ws-1.3
+      title: Node session manager
+      type: feat
+      priority: p2
+      risk: high
+      stage: sessions
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-1-plan.md
+      plan_section: §1.3
+      coded: true
+      reviewed: true
+      review_cycles: 1
+      created: ""
+    - id: phase-1-ws-1.4
+      title: 'Sessions over the host: run, ls, stop, logs'
+      type: feat
+      priority: p2
+      risk: medium
+      stage: sessions
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-1-plan.md
+      plan_section: §1.4
+      coded: true
+      reviewed: true
+      review_cycles: 1
+      created: ""
+    - id: phase-1-ws-1.5
+      title: Attach and interactive sessions
+      type: feat
+      priority: p2
+      risk: medium
+      stage: sessions
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-1-plan.md
+      plan_section: §1.5
+      coded: true
+      reviewed: true
+      review_cycles: 1
+      created: ""
+    - id: phase-1-ws-1.6
+      title: Node repository checkouts
+      type: feat
+      priority: p2
+      risk: high
+      stage: sessions
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-1-plan.md
+      plan_section: §1.6
+      coded: true
+      reviewed: true
+      review_cycles: 1
+      created: ""
+    - id: phase-1-ws-1.7
+      title: 'The launcher contract: `gaia run --wait`'
+      type: feat
+      priority: p2
+      risk: high
+      stage: sessions
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-1-plan.md
+      plan_section: §1.7
+      coded: true
+      reviewed: true
+      review_cycles: 1
+      created: ""
+    - id: phase-1-ws-1.8
+      title: Metis drives remote agents
+      type: feat
+      priority: p2
+      risk: medium
+      stage: sessions
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      plan: .metis/plans/phase-1-plan.md
+      plan_section: §1.8
+      coded: true
+      reviewed: true
+      review_cycles: 0
+      created: ""

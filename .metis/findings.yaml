@@ -113,32 +113,44 @@ findings:
       severity: P3
       category: maint
       finding: README.md:162 — The statement that the service survives logout and reboot is too broad for the selected macOS gui/UID LaunchAgent, which runs in the login session. Clarify macOS logout and next-login behavior while retaining the brief-decided LaunchAgent mechanism.
-      status: advisory
+      status: resolved
+      resolved_by: commit b67f02bed73a; README.md:236
       cycle: 1
       file: README.md
+      commit: b67f02bed73a62a60cac80c43bc60b624b36c85c
+      evidence: README.md:236
     - id: f-011
       date: "2026-11-27"
       slice: phase-0-gate
       severity: P3
       category: ""
       finding: 'Gate run 1 (v0.0.1): a TLS handshake failure on the host''s tailnet listener logs ''http: TLS handshake error from %!s(<nil>): remote error: tls: unknown certificate authority'' (http.Server ErrorLog via internal/host/host.go:107); the peer address is missing, so the warning cannot be tied to a device. Seen when a tailnet client without the self-signed certificate connected.'
-      status: advisory
+      status: resolved
+      resolved_by: commit b67f02bed73a; test TestAcceptedAddrKept
       file: http.Server
+      commit: b67f02bed73a62a60cac80c43bc60b624b36c85c
+      evidence: test TestAcceptedAddrKept
     - id: f-012
       date: "2026-11-27"
       slice: phase-0-gate
       severity: P3
       category: ""
       finding: 'Gate run 1 (v0.0.1): after the node service had been stopped about 40 s and started again, the node registered at once but the next forwarded request (gaia nodes on the node, 5 s later) and the next heartbeat both timed out (''context deadline exceeded''); it re-registered and recovered within about 16 s of start. Not reproduced on an immediate restart (25 samples, 14-15 ms each). Likely the host''s stale path to the node''s new WireGuard endpoint; worth a look before Phase 1 sessions depend on the forwarder.'
-      status: advisory
+      status: resolved
+      resolved_by: commit 00ab815f5404; test TestRestartedPeerResumes
+      commit: 00ab815f540438a13843631d10661cbd237115a5
+      evidence: test TestRestartedPeerResumes
     - id: f-013
       date: "2026-11-27"
       slice: phase-0-gate
       severity: P3
       category: ""
       finding: 'Gate run 1 (v0.0.1): the tailnet client creates an empty ~/.local/share/tailscale (tsnet logpolicy ''using system state directory'') outside Gaia''s state directory on the first join, although logtail is disabled (internal/net/tailnet.go:81). Harmless, but OVERVIEW 8 says the state directory is the one thing to back up and README says the node''s state is only <state>/tsnet.'
-      status: advisory
+      status: resolved
+      resolved_by: commit b67f02bed73a; test TestJoinWritesOnlyStateDir
       file: internal/net/tailnet.go
+      commit: b67f02bed73a62a60cac80c43bc60b624b36c85c
+      evidence: test TestJoinWritesOnlyStateDir
     - id: f-014
       date: "2026-11-28"
       slice: fix-0003
@@ -181,11 +193,194 @@ findings:
       severity: P3
       category: ""
       finding: 'Gate run 2 (v0.0.2) reproduces f-012 twice, so it is not a one-off: after the node had been down 40-45 s (process or user service) and started again, it registered at once, then the next heartbeat and forwarded request timed out. Under the service: gaia nodes on the node 1 s after start exit 90 (no daemon yet), at 11 s exit 99 after 10,020 ms (''context deadline exceeded''), at 16 s 4,060 ms, from 17 s on 14-15 ms. Node log: ''heartbeat failed; registering again'' 15 s after the first registration. Not seen on an immediate restart (run 1). Steady-state gaia nodes on the node is 9-10 ms.'
-      status: advisory
+      status: resolved
+      resolved_by: commit 00ab815f5404; test TestRestartedPeerResumes
+      commit: 00ab815f540438a13843631d10661cbd237115a5
+      evidence: test TestRestartedPeerResumes
     - id: f-018
       date: "2026-11-28"
       slice: phase-0-gate
       severity: P3
       category: ""
       finding: 'Gate run 2 (v0.0.2): a node whose --host still names a v0.0.1-era host device that is now offline (the stale <machine>-1 device) retries ''context deadline exceeded'' with no hint; the new refused-port hint (fix-0003) covers only a reachable device with nothing on 443. A unit written by v0.0.1 with the old --host would hit this after the host is moved to its gaia- name; README''s migration text says nodes then use the new name, which is enough if read.'
+      status: resolved
+      resolved_by: commit b67f02bed73a; test TestDialHint
+      commit: b67f02bed73a62a60cac80c43bc60b624b36c85c
+      evidence: test TestDialHint
+    - id: f-019
+      date: "2026-11-28"
+      slice: phase-1-ws-1.1
+      severity: P2
+      category: correctness
+      finding: 'internal/store/migrations/0003_sessions.sql:32 — INSERT OR REPLACE bypasses terminal-row freezing: with recursive_triggers off, replacing an exited row with the same id and state starting succeeds, deletes its outcome and does not fire sessions_no_delete; this violates the brief requirement that terminal rows cannot move to any state through raw SQL. Refuse replacement of existing session ids at the schema boundary and add a regression covering REPLACE against terminal rows.'
+      status: resolved
+      resolved_by: commit 2aad825e9d24; test TestTerminalSessionFrozenInSQL
+      cycle: 1
+      file: internal/store/migrations/0003_sessions.sql
+      commit: 2aad825e9d247c95aa7899c832c227229499f5e9
+      evidence: test TestTerminalSessionFrozenInSQL
+    - id: f-020
+      date: "2026-11-28"
+      slice: phase-1-ws-1.2
+      severity: P1
+      category: security
+      finding: 'internal/supervise/supervisor.go:174 — State copies spec.Argv without redacting known secrets, exposing them in state.json and socket status despite brief line 122. Reproduced with argv [/bin/echo, REVIEW_SECRET_123] and that value in secrets: scrollback is redacted but state.json contains the plaintext. Redact known secrets in persisted/returned metadata without changing the executed argv, and add a regression covering state and status.'
+      status: resolved
+      resolved_by: commit 6db59cdb7dbb; test TestSecretInArgvRedactedInStateAndStatus
+      cycle: 1
+      file: internal/supervise/supervisor.go
+      commit: 6db59cdb7dbbcaff582e6dfb132a50636241792f
+      evidence: test TestSecretInArgvRedactedInStateAndStatus
+    - id: f-021
+      date: "2026-11-28"
+      slice: phase-1-ws-1.2
+      severity: P1
+      category: behavior
+      finding: 'internal/supervise/supervisor.go:63 — The ready line is written before run installs SIGPIPE protection. Reproduced by closing the stdout read end before submitting a valid sleep spec: supervisor exits on SIGPIPE (-13), leaving an unended state and unsupervised child. Install signal protection before writing readiness (and protect the error/log path), with a subprocess regression proving starter loss during readiness still drains output and records the child exit.'
+      status: resolved
+      resolved_by: commit 7419fca1d086; test TestStarterGoneBeforeReadyLine
+      cycle: 1
+      file: internal/supervise/supervisor.go
+      commit: 7419fca1d08640e30cdf9aecd729fccf78563400
+      evidence: test TestStarterGoneBeforeReadyLine
+    - id: f-022
+      date: "2026-11-28"
+      slice: phase-1-ws-1.2
+      severity: P2
+      category: protocol
+      finding: internal/supervise/supervisor.go:551 — Stream adds four-byte frame lengths and a zero-length terminator instead of the raw scrollback required by brief lines 74-78; the header also omits offset when zero (protocol.go:58). A raw socket reproduction for empty scrollback returns four NUL bytes after {"ok":true}, so a contract client receives non-scrollback bytes and counts incorrect reconnect offsets. Implement the contracted header including offset zero and raw-byte stream in server/client, with a wire-level regression independent of the Go client.
+      status: resolved
+      resolved_by: commit f834d8728931; test TestStreamWireFormat
+      cycle: 1
+      file: internal/supervise/supervisor.go
+      commit: f834d87289315c95239239d42d370adc774c1dcb
+      evidence: test TestStreamWireFormat
+    - id: f-023
+      date: "2026-11-28"
+      slice: phase-1-ws-1.2
+      severity: P3
+      category: maint
+      finding: internal/supervise/protocol.go:116 — Successful calls register a second context.AfterFunc but discard its stop function. Repeated Status/Input calls sharing a long-lived cancellable context retain callbacks and closed connections until that context ends. Return and invoke cancellation-hook cleanup when each simple call or stream finishes.
       status: advisory
+      cycle: 1
+      file: internal/supervise/protocol.go
+    - id: f-024
+      date: "2026-11-28"
+      slice: phase-1-ws-1.3
+      severity: P1
+      category: behavior
+      finding: 'internal/node/session.go:645 — If the daemon dies after ready but before persisting running, and the agent exits before restart, reconcile attempts forbidden starting→exited; the record stays starting and its watcher exits without recording/reporting the real outcome. Reproduced by killing at ready, awaiting supervisor Ended(), then reopening: starting with nil exit code instead of exited/7. Recover through legal transitions and add a delayed-restart regression test.'
+      status: resolved
+      resolved_by: commit d8aaede95e5a; test TestRestartAfterEndAtReady; d8aaede
+      cycle: 1
+      file: internal/node/session.go
+      commit: d8aaede95e5a0e0d2f138fdee3e46d07bf6299e5
+      evidence: test TestRestartAfterEndAtReady
+    - id: f-025
+      date: "2026-11-28"
+      slice: phase-1-ws-1.3
+      severity: P2
+      category: behavior
+      finding: 'internal/node/session.go:611 — A cancelled Stop context makes Status dialing return CodeUnavailable, which observe treats as a dead supervisor; Stop persists/reports lost for an agent that is still running and reachable, making its scrollback eligible for pruning. Reproduced with an already-cancelled context followed by a successful fresh Status: manager state is lost. Treat caller cancellation/deadline expiry as undecided rather than evidence of supervisor loss, and add a regression test.'
+      status: resolved
+      resolved_by: commit 9a35b8007391; test TestStopCancelledStaysRunning; 9a35b80
+      cycle: 1
+      file: internal/node/session.go
+      commit: 9a35b80073914fc3d78e805c8a6bfb1bfc90917d
+      evidence: test TestStopCancelledStaysRunning
+    - id: f-026
+      date: "2026-11-28"
+      slice: phase-1-ws-1.4
+      severity: P2
+      category: behavior
+      finding: 'internal/node/sessionapi.go:109 — limitWriter returns errLimit only when a chunk exceeds the remaining snapshot, not when it exactly exhausts it. Reproduced with fakeagent print:ready sleep:1h: non-follow logs writes ready then hangs until the request deadline instead of returning. Return the limit sentinel immediately when the remaining count reaches zero and add an idle-running-agent regression test.'
+      status: resolved
+      resolved_by: commit 052236992ee2; test TestNodeAPILogsIdleRunningAgent
+      cycle: 1
+      file: internal/node/sessionapi.go
+      commit: 052236992ee2d12c931baec09b7edf32104c3ba3
+      evidence: test TestNodeAPILogsIdleRunningAgent
+    - id: f-027
+      date: "2026-11-28"
+      slice: phase-1-ws-1.4
+      severity: P2
+      category: data
+      finding: 'internal/host/session.go:224 — startFailed persists the failure outcome with the canceled HTTP request context. Reproduced by canceling the context during node start and returning context.Canceled: the response reason is session_lost but the stored row remains starting, contrary to the brief. Persist post-dispatch outcome reconciliation using a bounded context independent of caller cancellation, for lost and failed outcomes, and add cancellation regression coverage.'
+      status: resolved
+      resolved_by: commit a8908c468485; test TestStartSessionCanceledCaller
+      cycle: 1
+      file: internal/host/session.go
+      commit: a8908c4684856a34761e8fe8b05e2a8c58986e30
+      evidence: test TestStartSessionCanceledCaller
+    - id: f-028
+      date: "2026-11-28"
+      slice: phase-1-ws-1.4
+      severity: P2
+      category: behavior
+      finding: 'cmd/gaia/cli/sessions.go:101 — Follow treats output-writer errors as recoverable stream cuts and discards them. Reproduced with a writer returning disk-full while the session remains running: Follow queries the session and waits until context deadline rather than returning the write error; the CLI uses an unbounded background context. Distinguish sink failures from transport failures, return sink failures immediately, and add regression coverage.'
+      status: resolved
+      resolved_by: commit 009ec82f481e; test TestFollowSinkFailure
+      cycle: 1
+      file: cmd/gaia/cli/sessions.go
+      commit: 009ec82f481e6c81ca37fb08b3b92d650cd2d6e2
+      evidence: test TestFollowSinkFailure
+    - id: f-029
+      date: "2026-11-28"
+      slice: phase-1-ws-1.4
+      severity: P3
+      category: tests
+      finding: internal/node/sessionapi_test.go:71 — The committed brief at lines 153-156 requires a node API test for an offset before retained scrollback, but this suite only tests an offset past the end. Add a rotated-scrollback node API/SessionClient case asserting invalid_argument and the start detail for a before-start offset.
+      status: resolved
+      resolved_by: commit 7ac6195916bb; test TestNodeAPILogsBeforeStart
+      cycle: 1
+      file: internal/node/sessionapi_test.go
+      commit: 7ac6195916bbdf1d6444facd977b01634523d884
+      evidence: test TestNodeAPILogsBeforeStart
+    - id: f-030
+      date: "2026-11-28"
+      slice: phase-1-ws-1.5
+      severity: P2
+      category: behavior
+      finding: cmd/gaia/cli/attach.go:176 — sessionEnded checks its five-second deadline only after GetSession returns, but passes the unbounded parent context; a delayed daemon response reproduced a 7.00-second wait and exit 7 instead of the brief-required fallback 0 after five seconds (the default request timeout is ten seconds). Bound the entire polling loop and each request with the endWait deadline, return the documented fallback when it expires, and add a delayed-response regression test.
+      status: resolved
+      resolved_by: commit 3a8f0cdd2cf4; test TestAttachSessionEndsSlowHost
+      cycle: 1
+      file: cmd/gaia/cli/attach.go
+      commit: 3a8f0cdd2cf435b7ae89910aea44ef43cc331b22
+      evidence: test TestAttachSessionEndsSlowHost
+    - id: f-031
+      date: "2026-11-28"
+      slice: phase-1-ws-1.6
+      severity: P2
+      category: correctness
+      finding: internal/repo/checkout.go:101-109 — A post-checkout hook that exits 1 makes Prepare return checkout_failed after git switch has changed HEAD, created the requested local branch and replaced work-tree files; reproduced with a remote-only feature branch and a post-checkout hook containing exit 1. This violates the promised unchanged checkout on failure. Make the switch/fast-forward failure path preserve the pre-call checkout without forbidden git operations and add a regression test asserting HEAD, local refs and work-tree bytes remain unchanged.
+      status: resolved
+      resolved_by: commit 3e2f1f801917; test TestPrepareIgnoresFailingCheckoutHooks,TestPrepareCheckoutFailureLeavesCheckout; Verified fix in 3e2f1f8; all five regression subtests passed uncached.
+      cycle: 1
+      file: internal/repo/checkout.go
+      commit: 3e2f1f801917f21117a9f3086534fa05fa5b5d13
+      evidence: test TestPrepareIgnoresFailingCheckoutHooks,TestPrepareCheckoutFailureLeavesCheckout
+    - id: f-032
+      date: "2026-11-28"
+      slice: phase-1-ws-1.7
+      severity: P1
+      category: security
+      finding: internal/host/session.go:198 — StartSession persists the raw repository URL before node validation; a refused https://user:SECRET@example.com/r.git remains in ListSessions/GetSession and gaia ls -o json, exposing the password (reproduced with TestReviewCredentialURL via a temporary Go overlay). Reject credential-bearing repository URLs before persisting them and add a regression asserting the secret appears in neither stored session metadata nor API responses.
+      status: resolved
+      resolved_by: commit e00783f1be9a; test TestStartSessionCredentialURL
+      cycle: 1
+      file: internal/host/session.go
+      commit: e00783f1be9a5343bcedc37a6f6090a3ff377e77
+      evidence: test TestStartSessionCredentialURL
+    - id: f-033
+      date: "2026-11-28"
+      slice: phase-1-ws-1.7
+      severity: P2
+      category: behavior
+      finding: 'cmd/gaia/cli/wait.go:253 — waitSession blocks inside Logs with no deadline and checks Unreachable only after that call returns; a daemon or node that stalls an open stream can hang --wait indefinitely instead of exiting 95. TestReviewStalledLogStream reproduced this with an open HTTP response: a 100ms Unreachable limit was ignored until an outer 1s cancellation. Monitor reachability independently of the blocking stream or use bounded reads/retries, preserving healthy quiet sessions and byte offsets; add a regression for a stalled stream with an unreachable session endpoint.'
+      status: resolved
+      resolved_by: commit 11de2c985203; test TestWaitStalledLogStream
+      cycle: 1
+      file: cmd/gaia/cli/wait.go
+      commit: 11de2c9852036dcddb13d994d327a0c65899fb8d
+      evidence: test TestWaitStalledLogStream

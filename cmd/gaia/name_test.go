@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -170,23 +171,49 @@ func TestReportTailnetName(t *testing.T) {
 	}
 }
 
-func TestRefusedHint(t *testing.T) {
-	if refusedHint(nil, "h", "h.ts.net") != nil {
-		t.Error("nil error gained a hint")
-	}
-	other := errors.New("i/o timeout")
-	if refusedHint(other, "h", "h.ts.net") != other {
-		t.Error("other error changed")
+// timeoutErr is a net.Error that timed out, as a dial with a deadline can
+// return in place of context.DeadlineExceeded.
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "dial tcp 100.64.0.1:443: i/o timeout" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return false }
+
+func TestDialHint(t *testing.T) {
+	for _, online := range []bool{true, false} {
+		if dialHint(nil, "h", "h.ts.net", online) != nil {
+			t.Error("nil error gained a hint")
+		}
+		other := errors.New("tailnet: no peer named \"h\"")
+		if dialHint(other, "h", "h.ts.net", online) != other {
+			t.Error("other error changed")
+		}
 	}
 	for _, refused := range []error{
 		errors.New("dial tcp 100.64.0.1:443: connect: connection refused"),
 		// What a tsnet dial to a peer with port 443 closed returns.
 		errors.New("connect tcp 100.64.0.1:443: connection was refused"),
 	} {
-		err := refusedHint(refused, "studio", "studio.tail.ts.net")
-		if !errors.Is(err, refused) || !strings.Contains(err.Error(), "--host studio is studio.tail.ts.net") ||
+		err := dialHint(refused, "studio", "studio.tail.ts.net", true)
+		if !errors.Is(err, refused) || !strings.Contains(err.Error(), "--host studio is studio.tail.ts.net, where nothing answers on port 443") ||
 			!strings.Contains(err.Error(), "gaia-<machine name>") {
 			t.Errorf("hint for %q: %v", refused, err)
+		}
+	}
+	for _, timedOut := range []error{
+		// What the retry log showed for a stale, offline host device (f-018).
+		fmt.Errorf("connect tcp 100.64.0.9:443: %w", context.DeadlineExceeded),
+		timeoutErr{},
+	} {
+		err := dialHint(timedOut, "studio", "studio-1.tail.ts.net", false)
+		if !errors.Is(err, timedOut) || !strings.Contains(err.Error(), "--host studio is studio-1.tail.ts.net, which the tailnet reports offline") ||
+			!strings.Contains(err.Error(), "gaia-<machine name>") {
+			t.Errorf("offline hint for %q: %v", timedOut, err)
+		}
+		err = dialHint(timedOut, "studio", "studio-1.tail.ts.net", true)
+		if !errors.Is(err, timedOut) || !strings.Contains(err.Error(), "did not answer on port 443, so it is offline or not a Gaia host") ||
+			!strings.Contains(err.Error(), "gaia-<machine name>") {
+			t.Errorf("unanswered hint for %q: %v", timedOut, err)
 		}
 	}
 }

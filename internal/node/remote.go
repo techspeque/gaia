@@ -28,6 +28,14 @@ const (
 	DefaultHeartbeatInterval = 10 * time.Second
 	// DialTimeout bounds connecting to the host, TLS handshake included.
 	DialTimeout = 5 * time.Second
+	// DefaultConfirmAfter is how soon after a registration the first
+	// heartbeat goes out, confirming the path to the host before a full
+	// interval has passed.
+	DefaultConfirmAfter = time.Second
+	// RecoveryWait bounds how long a forwarded request waits for the host's
+	// response headers while the node's Link is not ready. In steady state
+	// there is no such bound.
+	RecoveryWait = 3 * time.Second
 )
 
 // maxResponse bounds how much of a host response the node reads.
@@ -73,6 +81,14 @@ func (c *Client) Heartbeat(ctx context.Context, req core.HeartbeatRequest) (core
 	return res, c.post(ctx, core.HeartbeatPath, req, &res)
 }
 
+// ReportSession sends a session report to the host: Client is a node
+// session manager's Reporter over the tailnet. The host knows the node by
+// its tailnet identity.
+func (c *Client) ReportSession(ctx context.Context, r core.SessionReport) error {
+	var res core.ReportSessionResponse
+	return c.post(ctx, core.SessionReportsPath, core.ReportSessionRequest{Report: r}, &res)
+}
+
 // post sends in as JSON to path and decodes a 2xx answer into out. A
 // non-2xx answer is the host's *core.Error.
 func (c *Client) post(ctx context.Context, path string, in, out any) error {
@@ -114,20 +130,34 @@ type RunConfig struct {
 	// MinBackoff and MaxBackoff bound the wait between registration
 	// attempts while the host is unreachable; the wait doubles each time.
 	MinBackoff, MaxBackoff time.Duration
+	// ConfirmAfter is how soon after each registration the first heartbeat
+	// is sent, at most the host's interval. Default: DefaultConfirmAfter.
+	ConfirmAfter time.Duration
+	// Link, if set, is kept up to date with where the node stands with the
+	// host: registering, confirming (registered, no heartbeat answered yet)
+	// or ready.
+	Link *Link
 	// Logger receives progress and failures. Default: discard.
 	Logger *slog.Logger
 }
 
 // Run registers with the host, then heartbeats at the interval the host
-// names, until ctx is done, when it returns nil. A failed heartbeat (the
-// host is unreachable or no longer knows this node) sends it back to
-// registering, retried with backoff for as long as it takes: a node never
-// stops because the host is down. The one error Run returns is a
+// names, until ctx is done, when it returns nil. The first heartbeat after
+// each registration goes out after ConfirmAfter, so a path to the host
+// that is still settling is found quickly. A failed heartbeat (the host is
+// unreachable or no longer knows this node) sends it back to registering,
+// retried with backoff for as long as it takes: a node never stops because
+// the host is down. The one error Run returns is a
 // core.CodeVersionMismatch refusal, which only an upgrade fixes.
 func Run(ctx context.Context, cfg RunConfig) error {
 	log := cfg.Logger
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
+	}
+	link := cfg.Link
+	confirm := cfg.ConfirmAfter
+	if confirm <= 0 {
+		confirm = DefaultConfirmAfter
 	}
 	minB, maxB := cfg.MinBackoff, cfg.MaxBackoff
 	if minB <= 0 {
@@ -138,6 +168,7 @@ func Run(ctx context.Context, cfg RunConfig) error {
 	}
 	backoff := minB
 	for {
+		link.Set(PhaseRegistering)
 		res, err := cfg.Host.Register(ctx, cfg.Request)
 		if ctx.Err() != nil {
 			return nil
@@ -146,6 +177,7 @@ func Run(ctx context.Context, cfg RunConfig) error {
 			if errors.Is(err, core.NewError(core.CodeVersionMismatch, "")) {
 				return err
 			}
+			link.Failed(err)
 			log.Warn("registration with the host failed; retrying", "err", err, "retry_in", backoff.String())
 			if !sleep(ctx, backoff) {
 				return nil
@@ -158,29 +190,39 @@ func Run(ctx context.Context, cfg RunConfig) error {
 		if interval <= 0 {
 			interval = DefaultHeartbeatInterval
 		}
+		link.Set(PhaseConfirming)
 		log.Info("node registered", "id", res.Node.ID.String(), "name", res.Node.Name,
 			"heartbeat_interval", interval.String())
-		err = heartbeat(ctx, cfg.Host, res.Node.ID, interval)
+		err = heartbeat(ctx, cfg.Host, res.Node.ID, min(confirm, interval), interval, link)
 		if ctx.Err() != nil {
 			return nil
 		}
+		link.Failed(err)
 		log.Warn("heartbeat failed; registering again", "err", err)
 	}
 }
 
-// heartbeat sends a heartbeat for id every interval until one fails, and
-// returns that error, or nil when ctx is done.
-func heartbeat(ctx context.Context, h Host, id core.NodeID, interval time.Duration) error {
+// heartbeat sends a heartbeat for id after first, then every interval, until
+// one fails, and returns that error, or nil when ctx is done. Each answered
+// heartbeat sets link ready.
+func heartbeat(ctx context.Context, h Host, id core.NodeID, first, interval time.Duration, link *Link) error {
+	if !sleep(ctx, first) {
+		return nil
+	}
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
+		if _, err := h.Heartbeat(ctx, core.HeartbeatRequest{ID: id}); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+		link.Set(PhaseReady)
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-t.C:
-		}
-		if _, err := h.Heartbeat(ctx, core.HeartbeatRequest{ID: id}); err != nil {
-			return err
 		}
 	}
 }
@@ -199,8 +241,8 @@ func sleep(ctx context.Context, d time.Duration) bool {
 
 // Handler is the API on a node's local socket: /healthz answered by the
 // node itself, every other /api/v1 request passed to forward (the host),
-// except the node's own registration and heartbeat, which no local process
-// may send in the node's name.
+// except the node's own registration, heartbeat and session reports, which
+// no local process may send in the node's name.
 func Handler(forward http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	notFound := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -217,6 +259,7 @@ func Handler(forward http.Handler) http.Handler {
 	})
 	mux.Handle("POST "+core.NodesPath, notFound)
 	mux.Handle(core.HeartbeatPath, notFound)
+	mux.Handle(core.SessionReportsPath, notFound)
 	mux.Handle(core.APIPrefix+"/", forward)
 	mux.Handle("/", notFound)
 	return mux
@@ -225,23 +268,126 @@ func Handler(forward http.Handler) http.Handler {
 // Forwarder passes requests to the host at base unchanged, over transport.
 // When the host cannot be reached the answer is 503 with code unavailable
 // and a message naming hostName.
-func Forwarder(base *url.URL, transport http.RoundTripper, hostName string, log *slog.Logger) http.Handler {
+//
+// While link is not ready (the node is joining, registering or confirming
+// its path to the host), a request waits at most RecoveryWait for the
+// host's response headers, and a failure says that the node is
+// re-establishing its connection, at what stage and for how long. A nil
+// link is always ready.
+func Forwarder(base *url.URL, transport http.RoundTripper, hostName string, link *Link, log *slog.Logger) http.Handler {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &httputil.ReverseProxy{
 		Rewrite:   func(pr *httputil.ProxyRequest) { pr.SetURL(base) },
-		Transport: transport,
+		Transport: &recoveringTransport{rt: transport, link: link, wait: RecoveryWait},
 		ErrorLog:  slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			log.Warn("forwarding to the host failed", "method", r.Method, "path", r.URL.Path, "err", err)
-			writeError(w, http.StatusServiceUnavailable, &core.Error{
+			e := &core.Error{
 				Code:    core.CodeUnavailable,
 				Message: fmt.Sprintf("the host %s is unreachable from this node: %v", hostName, err),
 				Details: map[string]string{"host": hostName},
-			})
+			}
+			var re *recoveringError
+			if errors.As(err, &re) {
+				e.Message = re.message(hostName, time.Now())
+				e.Details["link"] = string(re.state.Phase)
+			}
+			writeError(w, http.StatusServiceUnavailable, e)
 		},
 	}
+}
+
+// recoveringError is a forwarded request that failed while the link was not
+// ready.
+type recoveringError struct {
+	state    LinkState
+	wait     time.Duration
+	timedOut bool
+	err      error
+}
+
+func (e *recoveringError) Error() string {
+	if e.timedOut {
+		return fmt.Sprintf("no answer from the host within %s while %s", e.wait, e.state.Describe(time.Now()))
+	}
+	return fmt.Sprintf("%v (while %s)", e.err, e.state.Describe(time.Now()))
+}
+
+func (e *recoveringError) Unwrap() error { return e.err }
+
+func (e *recoveringError) message(host string, now time.Time) string {
+	cause := fmt.Sprintf("%v", e.err)
+	if e.timedOut {
+		cause = fmt.Sprintf("the host did not answer within %s", e.wait)
+	}
+	return fmt.Sprintf("this node is re-establishing its connection to the host %s (%s): %s; try again in a few seconds",
+		host, e.state.Describe(now), cause)
+}
+
+// recoveringTransport bounds the wait for response headers while link is
+// not ready; see Forwarder.
+type recoveringTransport struct {
+	rt   http.RoundTripper
+	link *Link
+	wait time.Duration
+}
+
+func (t *recoveringTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.link.Ready() {
+		return t.rt.RoundTrip(req)
+	}
+	ctx, cancel := context.WithCancel(req.Context())
+	timer := time.AfterFunc(t.wait, cancel)
+	res, err := t.rt.RoundTrip(req.WithContext(ctx))
+	if !timer.Stop() && req.Context().Err() == nil {
+		// The wait ran out, whether or not headers arrived just after.
+		if res != nil {
+			_ = res.Body.Close()
+		}
+		return nil, &recoveringError{state: t.link.State(), wait: t.wait, timedOut: true, err: context.DeadlineExceeded}
+	}
+	if err != nil {
+		cancel()
+		if req.Context().Err() != nil {
+			return nil, err
+		}
+		return nil, &recoveringError{state: t.link.State(), wait: t.wait, err: err}
+	}
+	// Headers arrived in time: the body streams for as long as it takes.
+	if rwc, ok := res.Body.(io.ReadWriteCloser); ok && res.StatusCode == http.StatusSwitchingProtocols {
+		// An upgraded connection (a terminal WebSocket): the proxy needs to
+		// write to it as well.
+		res.Body = &cancelOnCloseRW{ReadWriteCloser: rwc, cancel: cancel}
+		return res, nil
+	}
+	res.Body = &cancelOnClose{ReadCloser: res.Body, cancel: cancel}
+	return res, nil
+}
+
+// cancelOnCloseRW is cancelOnClose for an upgraded connection.
+type cancelOnCloseRW struct {
+	io.ReadWriteCloser
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnCloseRW) Close() error {
+	err := c.ReadWriteCloser.Close()
+	c.cancel()
+	return err
+}
+
+// cancelOnClose releases a request's context when its body is closed.
+type cancelOnClose struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnClose) Close() error {
+	err := c.ReadCloser.Close()
+	c.cancel()
+	return err
 }
 
 // DialHost connects to the host and returns the connection with the name

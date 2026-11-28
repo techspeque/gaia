@@ -11,10 +11,14 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"tailscale.com/client/local"
+	"tailscale.com/ipn"
 	"tailscale.com/logtail"
+	"tailscale.com/tailcfg"
 	"tailscale.com/tsnet"
+	"tailscale.com/types/key"
 
 	"github.com/techspeque/gaia/internal/core"
 )
@@ -74,6 +78,11 @@ type Tailnet struct {
 
 // Join starts tsnet and returns once the node is Running on the tailnet.
 // It calls logtail.Disable first, so tsnet uploads no logs to Tailscale.
+//
+// Join sets TS_LOGS_DIR, process-wide, to the tsnet state directory.
+// Without it, tsnet's local backend picks a logs directory of its own
+// (logpolicy.LogsDir, for its socket-stats logger) and creates one such
+// as ~/.local/share/tailscale, outside Gaia's state directory. A daemon runs one tailnet client, so one value serves.
 func Join(ctx context.Context, cfg Config) (*Tailnet, error) {
 	if cfg.Dir == "" {
 		return nil, errors.New("tailnet: no state directory")
@@ -86,6 +95,9 @@ func Join(ctx context.Context, cfg Config) (*Tailnet, error) {
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("tailnet: state directory: %w", err)
+	}
+	if err := os.Setenv("TS_LOGS_DIR", dir); err != nil {
+		return nil, fmt.Errorf("tailnet: logs directory: %w", err)
 	}
 
 	logf := redactingLogf(cfg.Logf, cfg.AuthKey)
@@ -152,7 +164,7 @@ func (t *Tailnet) ListenTLS(port int) (stdnet.Listener, error) {
 			return fallback, nil
 		},
 	}
-	return tls.NewListener(l, cfg), nil
+	return tls.NewListener(addrKeepingListener{l}, cfg), nil
 }
 
 // selfSignedNames are the DNS names and IP addresses the self-signed
@@ -204,6 +216,8 @@ type PeerAddr struct {
 	// DNSName is the peer's MagicDNS name without the trailing dot, or ""
 	// when the control server gives none.
 	DNSName string
+	// Online is whether the control server reports the peer connected.
+	Online bool
 }
 
 // LookupPeer finds the peer called name in this node's view of the
@@ -237,7 +251,7 @@ func (t *Tailnet) LookupPeer(ctx context.Context, name string) (PeerAddr, error)
 				break
 			}
 		}
-		found = append(found, PeerAddr{Addr: addr, DNSName: dns})
+		found = append(found, PeerAddr{Addr: addr, DNSName: dns, Online: p.Online})
 	}
 	switch len(found) {
 	case 0:
@@ -285,6 +299,76 @@ func (t *Tailnet) Addr() string {
 		return ""
 	}
 	return ip4.String()
+}
+
+// renewDelays are when, after a peer's disco key changes, ResumeRestartedPeers
+// pings it. The first ping can still ride the session the engine is about
+// to drop; the later ones follow the drop and start the new session.
+var renewDelays = []time.Duration{500 * time.Millisecond, 1500 * time.Millisecond, 3 * time.Second, 6 * time.Second}
+
+// ResumeRestartedPeers keeps peers that restart reachable: it watches this
+// node's netmap and, when a peer's disco key changes, pings that peer over
+// the tailnet so this side starts a new WireGuard session. It runs until
+// ctx is done and returns ctx's error, or the first error watching fails
+// with. The host runs it, because it only answers nodes and never sends to them first.
+//
+// Why: a node gets a new disco key every time it starts. When the control
+// server tells the host about the new key, the host's engine drops its
+// WireGuard session with that node, so a restarted peer gets a fresh
+// handshake. If the node has already handshaken and registered by then
+// (after an outage, the control server can be seconds late), the node
+// keeps sending on the session the host has dropped. The host discards
+// those packets without telling the node, and the node notices only when
+// WireGuard's 15 s "stopped hearing back" timer fires a new handshake.
+// The host's ping makes it start that handshake at once (fix-0004).
+func (t *Tailnet) ResumeRestartedPeers(ctx context.Context) error {
+	w, err := t.lc.WatchIPNBus(ctx, ipn.NotifyInitialNetMap)
+	if err != nil {
+		return fmt.Errorf("tailnet: watch: %w", err)
+	}
+	defer w.Close()
+	disco := map[tailcfg.NodeID]key.DiscoPublic{}
+	for {
+		n, err := w.Next()
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("tailnet: watch: %w", err)
+		}
+		if n.NetMap == nil {
+			continue
+		}
+		for _, p := range n.NetMap.Peers {
+			k := p.DiscoKey()
+			old, seen := disco[p.ID()]
+			disco[p.ID()] = k
+			if !seen || old == k || k.IsZero() || p.Addresses().Len() == 0 {
+				continue
+			}
+			addr := p.Addresses().At(0).Addr()
+			t.logf("gaia: peer %s (%s) restarted; renewing its WireGuard session", nodeName(p.Name(), p.ComputedName()), addr)
+			go t.renew(ctx, addr)
+		}
+	}
+}
+
+// renew pings addr at each of renewDelays after now.
+func (t *Tailnet) renew(ctx context.Context, addr netip.Addr) {
+	start := time.Now()
+	for _, d := range renewDelays {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Until(start.Add(d))):
+		}
+		pctx, cancel := context.WithTimeout(ctx, time.Second)
+		_, err := t.lc.Ping(pctx, addr, tailcfg.PingTSMP)
+		cancel()
+		if err != nil && ctx.Err() == nil {
+			t.logf("gaia: renewing the WireGuard session with %s: ping after %s: %v", addr, d, err)
+		}
+	}
 }
 
 // Close leaves the tailnet and stops tsnet.

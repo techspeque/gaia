@@ -154,6 +154,10 @@ func nodeDaemon(cfg nodeConfig, log *slog.Logger) int {
 	}
 	defer func() { _ = l.Close() }()
 
+	// link tells the forwarder where the node stands with the host, so a
+	// request while it is (re)connecting gets a prompt answer saying so.
+	link := &node.Link{}
+	link.Set(node.PhaseJoining)
 	var tn atomic.Pointer[gnet.Tailnet]
 	transport := node.HostTransport(func(ctx context.Context) (net.Conn, string, error) {
 		t := tn.Load()
@@ -165,14 +169,28 @@ func nodeDaemon(cfg nodeConfig, log *slog.Logger) int {
 			return nil, "", err
 		}
 		c, err := t.Dial(ctx, "tcp", netip.AddrPortFrom(p.Addr, tailnetPort).String())
-		return c, p.DNSName, refusedHint(err, cfg.host, p.DNSName)
+		return c, p.DNSName, dialHint(err, cfg.host, p.DNSName, p.Online)
 	})
 	defer transport.CloseIdleConnections()
 	base := &url.URL{Scheme: "https", Host: cfg.host}
+	hostClient := &node.Client{
+		HTTP:    &http.Client{Transport: transport, Timeout: hostRequestTimeout},
+		BaseURL: base.String(),
+	}
+
+	// Sessions first: those that outlived the last daemon are found again
+	// and reported once the host is reachable (ADR-0008 rule 4).
+	mgr, local, err := openSessions(ctx, cfg.state, hostClient, log)
+	if err != nil {
+		log.Error("cannot start the node's sessions", "err", err)
+		return 1
+	}
+	defer mgr.Close()
+	go mgr.Run(ctx)
 
 	served := make(chan error, 1)
 	go func() {
-		served <- serveHTTP(ctx, l, node.Handler(node.Forwarder(base, transport, cfg.host, log)), log)
+		served <- serveHTTP(ctx, l, node.Handler(node.Forwarder(base, transport, cfg.host, link, log)), log)
 	}()
 	log.Info("node started", "socket", l.Path(), "state", cfg.state, "host", cfg.host, "name", cfg.name)
 
@@ -206,14 +224,27 @@ func nodeDaemon(cfg nodeConfig, log *slog.Logger) int {
 	log.Info("joined the tailnet", "tailnet_addr", t.Addr())
 	reportTailnetName(ctx, t, cfg.name, "node", log)
 
+	// The node API, for the host only: start, stop and read sessions.
+	tl, err := t.ListenTLS(tailnetPort)
+	if err != nil {
+		log.Error("cannot listen on the tailnet", "err", err)
+		cancel()
+		<-served
+		log.Info("node stopped", "exit_code", 1)
+		return 1
+	}
+	apiDone := make(chan error, 1)
+	go func() {
+		apiDone <- serveHTTP(ctx, tl, node.SessionHandler(local, hostPeerCheck(t, cfg.host), log), log)
+	}()
+	defer func() { <-apiDone }()
+
 	runDone := make(chan error, 1)
 	go func() {
 		err := node.Run(ctx, node.RunConfig{
-			Host: &node.Client{
-				HTTP:    &http.Client{Transport: transport, Timeout: hostRequestTimeout},
-				BaseURL: base.String(),
-			},
+			Host:    hostClient,
 			Request: node.Request(cfg.name, version),
+			Link:    link,
 			Logger:  log,
 		})
 		if err != nil {
@@ -233,22 +264,38 @@ func nodeDaemon(cfg nodeConfig, log *slog.Logger) int {
 	return code
 }
 
-// refusedHint adds to a refused dial of the host what is likely wrong: the
-// device --host names (dnsName) runs no Gaia host, typically because it is
-// the host machine's own Tailscale device and Gaia's is called
-// gaia-<machine name> or another name the host logs. Other errors, and nil,
-// are returned as they are. A refusal reads "connection refused" from the
-// kernel and "connection was refused" from tsnet's netstack.
-func refusedHint(err error, host, dnsName string) error {
+// hostNameHint ends the dial hints: where the Gaia host's device is found.
+const hostNameHint = "a Gaia host asks for the tailnet name gaia-<machine name> and logs the tailnet_name it was given"
+
+// dialHint adds to a failed dial of the host what is likely wrong with the
+// device --host names (dnsName; online as the tailnet reports it). Errors
+// other than these, and nil, are returned as they are.
+//   - Refused: the device runs no Gaia host, typically because it is the
+//     host machine's own Tailscale device. A refusal reads "connection
+//     refused" from the kernel and "connection was refused" from tsnet's
+//     netstack.
+//   - Timed out: the device is offline, or answers nothing on the port, so
+//     it is not a Gaia host; typically a stale device left by an earlier
+//     host name.
+func dialHint(err error, host, dnsName string, online bool) error {
 	if err == nil {
 		return nil
 	}
-	if msg := err.Error(); !strings.Contains(msg, "connection refused") && !strings.Contains(msg, "connection was refused") {
+	if msg := err.Error(); strings.Contains(msg, "connection refused") || strings.Contains(msg, "connection was refused") {
+		return fmt.Errorf("%w: --host %s is %s, where nothing answers on port %d, so it is not a Gaia host; %s",
+			err, host, dnsName, tailnetPort, hostNameHint)
+	}
+	var ne net.Error
+	if !errors.Is(err, context.DeadlineExceeded) && (!errors.As(err, &ne) || !ne.Timeout()) {
 		return err
 	}
-	return fmt.Errorf("%w: --host %s is %s, where nothing answers on port %d, so it is not a Gaia host; "+
-		"a Gaia host asks for the tailnet name gaia-<machine name> and logs the tailnet_name it was given",
-		err, host, dnsName, tailnetPort)
+	if !online {
+		return fmt.Errorf("%w: --host %s is %s, which the tailnet reports offline; "+
+			"if the host now runs under another name, point --host at it; %s",
+			err, host, dnsName, hostNameHint)
+	}
+	return fmt.Errorf("%w: --host %s is %s, which did not answer on port %d, so it is offline or not a Gaia host; %s",
+		err, host, dnsName, tailnetPort, hostNameHint)
 }
 
 // serveHTTP serves h on l until ctx is done, then shuts down, waiting up to

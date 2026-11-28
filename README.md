@@ -184,23 +184,77 @@ gaia node --host gaia-studio
   `--missed-heartbeats` (default 3) intervals without one. A node keeps
   running while the host is down, retries with backoff, and registers again
   when the host returns. Restarted with the same state directory, a node
-  keeps its id.
+  keeps its id. Until a node's first heartbeat after registering is
+  answered, which is normally about a second, a `gaia` command on that machine
+  waits at most 3 s for the host. If the host does not answer in that time,
+  the command says the node is re-establishing its connection to the host.
+  Run it again a few seconds later.
 - **Versions.** The host accepts nodes at its own API version and one
   behind. Any other node is refused, with the command that fixes it.
 - **State.** A node's state directory holds only the tailnet client's state
   (`<state>/tsnet`) and its name (`<state>/name`): no auth key and no
-  credentials.
+  credentials. The tailnet client writes nothing outside `<state>/tsnet`,
+  its logs directory included.
 - **Removing a machine.** `gaia nodes remove NAME` removes a retired
   machine. A node still running registers again at its next heartbeat, so
   stop `gaia node` on it first.
 
+## Running Metis agents on a node
+
+`gaia run … --wait` acts like an agent process started on this machine, so
+Metis can start any of its agents on
+any node. `metis launch` and `metis auto` both work this way. In
+`.metis/project.yaml`, prefix the agent's `launch` argv with
+`gaia run --node NODE --wait --` and set `remote: true`:
+
+```yaml
+agents:
+  claude-code/opus-5-5:
+    surface: claude-code
+    model: claude-opus-5-5
+    remote: true
+    launch: [gaia, run, --node, gaia-studio, --wait, --,
+             claude, -p, "{prompt}", --model, "{model}",
+             --permission-mode, acceptEdits,
+             --allowedTools, "Bash(metis:*)", "Bash(git:*)"]
+  codex/gpt-6-astra:
+    surface: opencode
+    model: openai/gpt-6-astra
+    remote: true
+    launch: [gaia, run, --node, gaia-laptop, --wait, --,
+             opencode, run, --model, "{model}", "{prompt}"]
+```
+
+- **`NODE`** is a name from the `NAME` column of `gaia nodes`. Each agent
+  can name a different node, so the coder and the reviewer of one slice can
+  run on different machines.
+- **`remote: true`** (Metis v0.0.25 or later) makes Metis push the current
+  branch before each session and fetch it, fast-forward only, after. Gaia
+  needs that: the agent runs in the node's own checkout of the
+  repository's `origin` at that branch. The node pushes the agent's
+  commits before `gaia run` returns, and Metis then reads the ledger from
+  them. Gaia never writes to `.metis/`.
+- **On each node** the agent CLI must be installed and signed in, and
+  `metis` and `git` must be on `PATH`. The node user needs push access to
+  the repository. Until Phase 2, a session inherits the environment of the
+  node user and gets no credentials from the host.
+- **Exit codes.** `metis launch` and `metis auto` see the agent's exit code.
+  When Gaia itself fails they see a code from 90 to 99, for example 93 when
+  the branch is not pushed or the node's checkout is dirty. The full table
+  is in [the launcher contract](docs/contracts/launcher-v1.md).
+- **Interrupts.** Ctrl-C on `metis auto` or `metis launch` stops the remote
+  session.
+- `metis launch --dry-run` prints the full `gaia run` argv.
+
 ## Running as a service
 
-`gaia service install` runs the daemon as a service of the current user, so
-it survives logout and reboot: a systemd user unit on Linux
+`gaia service install` runs the daemon as a service of the current user,
+started for you and restarted if it fails: a systemd user unit on Linux
 (`~/.config/systemd/user/gaia.service`), a launchd agent on macOS
 (`~/Library/LaunchAgents/io.github.techspeque.gaia.plist`, logging to
 `~/Library/Logs/gaia/gaia.log`). It needs no root and never runs `sudo`.
+How it behaves at logout and reboot differs by platform; see the last
+points below.
 
 ```sh
 gaia service install host --node                     # local-only
@@ -224,7 +278,11 @@ gaia service uninstall
   directory stays.
 - On Linux, a user service stops at logout and does not start at boot
   unless lingering is on. When it is off, install prints the one command to
-  run, `loginctl enable-linger USER`; Gaia never runs it.
+  run, `loginctl enable-linger USER`; Gaia never runs it. With lingering
+  on, it survives logout and starts at boot.
+- On macOS, the launchd agent runs in your login session: it stops when you
+  log out and starts again when you next log in. After a reboot it starts
+  at your login, not at boot.
 - Windows is not supported yet.
 
 ## Footprint
