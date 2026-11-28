@@ -42,10 +42,10 @@ process list or state file other than tsnet's own state.
 
 ## Evidence criteria
 
-- [ ] All phase slices coded and reviewed
-- [ ] Cross-module integration tests pass
-- [ ] No interface mismatches at seam points
-- [ ] Performance/resource usage acceptable
+- [x] All phase slices coded and reviewed (ws-0.1..0.9, fix-0001..0003 archived)
+- [x] Cross-module integration tests pass — run 2: all eight scenarios evidenced on v0.0.2
+- [x] No interface mismatches at seam points — run 2: node and host 0.0.2 over the tailnet; `gaia nodes -o json` matches its fixture
+- [x] Performance/resource usage acceptable — run 2: figures in the report and README; the f-012 window after an outage is for the Reviewer
 
 ## Declared file scope
 
@@ -199,7 +199,7 @@ before this gate. Scenarios 1, 3–7 and the performance checks pass on
 v0.0.1 with the assigned names; scenario 8 waits for the reboot. The gate is
 re-run from scenario 2 on the release carrying fix-0003.
 
-### Run 2 — 2026-11-28, v0.0.2 — Coder's evidence complete except the reboot
+### Run 2 — 2026-11-28, v0.0.2 — Coder's evidence complete; verdict is the Reviewer's
 
 Same hosts, same tailnet, `<A>`/`<B>` as in run 1. `metis verify --pre`
 on the branch after fix-0003: ALL GREEN. Install, both hosts, 10:05–10:06 GMT: the same `install.sh`
@@ -307,7 +307,7 @@ off), and f-011's log line recurs.
 same order, same types, same line layout; ids match `^node_[0-9a-z]{26}$`;
 `tailnet_name` `""` local-only, the assigned names on the tailnet.
 
-#### Scenario 8: user services, no root, reboot, uninstall — needs the Human (reboot)
+#### Scenario 8: user services, no root, reboot, uninstall — PASS (both hosts)
 
 - After the hand runs, as README says: A `gaia service install host
   --tailnet --node --allow node:gaia-<B>` (rewrote the v0.0.1 unit, "wrote …
@@ -319,7 +319,27 @@ same order, same types, same line layout; ids match `^node_[0-9a-z]{26}$`;
   state directory is left in place"; unit `not-found`; no process; file
   listing and sha256 of `name` and `tsnet/tailscaled.state` identical before
   and after. Reinstalled: online, same id.
-- **Not yet evidenced:** up after a reboot (the Human's `sudo reboot`).
+- **Reboot (the Human's `sudo reboot`, both hosts), checked 10:35 GMT:**
+  - Host A: boot 10:29:46 (`uptime -s`; `journalctl --list-boots` boot 0
+    from 10:29:48), later than the unit (written 10:09:12). The user
+    manager started `gaia.service` at 10:29:54 in this boot
+    (`ActiveEnterTimestamp`), MainPID started 10:29:53, `NRestarts=0`, as
+    the login user. Journal: `tailnet name assigned … asked gaia-<A>,
+    tailnet_name gaia-<A>`, `host started`, its own node `node_4d8w…`
+    re-registered (`updated: true`), B's `node_77m6…` registered at 10:30:00.
+  - Node B: boot 10:29:38, later than the unit (10:11:16); service active
+    from 10:29:45 in this boot, `NRestarts=0`. Journal: `tailnet name
+    assigned … gaia-<B>`; two registration retries ("context deadline
+    exceeded", while A was still booting), then `node registered` 10:30:00
+    with the same id. No auth key: the unit has none, and no `--join`.
+  - `gaia nodes -o json` on A and on B: the same two ids as before the
+    reboot, names and `tailnet_name` `gaia-<A>`/`gaia-<B>`, `online`, 0.0.2.
+  - Tailnet peers seen from each host: the laptop, the other host's own
+    device, `gaia-<A>`, `gaia-<B>`; no new Gaia device. The two stale
+    v0.0.1 devices (`<A>-1`, `<B>-1`) no longer appear: the Human has
+    deleted them.
+  - Auth key, this boot: no hit in the user journal, the state directory,
+    the units, or any own process's cmdline or environ.
 
 #### Auth key
 
@@ -356,5 +376,9 @@ unit files, `~/.local/share/tailscale`, `/tmp/gaia-1000`, the user journal
 
 #### Run 2 status
 
-Every scenario and performance check has evidence on v0.0.2 except
-scenario 8's reboot. Not flipped coded: that waits for the reboot.
+Every scenario and performance check has evidence on v0.0.2, scenario 8's
+reboot included (the Human's reboot, 10:29 GMT). The open question for the
+Reviewer: whether the `gaia nodes` under 500 ms check covers the f-012
+window after a node returns from an outage. Open advisories f-010, f-011,
+f-012/f-017, f-013, f-018 are to become fix slices after the review.
+Flipped coded for review.
