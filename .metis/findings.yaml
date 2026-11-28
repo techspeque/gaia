@@ -113,9 +113,12 @@ findings:
       severity: P3
       category: maint
       finding: README.md:162 — The statement that the service survives logout and reboot is too broad for the selected macOS gui/UID LaunchAgent, which runs in the login session. Clarify macOS logout and next-login behavior while retaining the brief-decided LaunchAgent mechanism.
-      status: advisory
+      status: resolved
+      resolved_by: commit b67f02bed73a; README.md:236
       cycle: 1
       file: README.md
+      commit: b67f02bed73a62a60cac80c43bc60b624b36c85c
+      evidence: README.md:236
     - id: f-011
       date: "2026-11-27"
       slice: phase-0-gate
