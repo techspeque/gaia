@@ -237,3 +237,12 @@ findings:
       status: open
       cycle: 1
       file: internal/supervise/supervisor.go
+    - id: f-022
+      date: "2026-11-28"
+      slice: phase-1-ws-1.2
+      severity: P2
+      category: protocol
+      finding: internal/supervise/supervisor.go:551 — Stream adds four-byte frame lengths and a zero-length terminator instead of the raw scrollback required by brief lines 74-78; the header also omits offset when zero (protocol.go:58). A raw socket reproduction for empty scrollback returns four NUL bytes after {"ok":true}, so a contract client receives non-scrollback bytes and counts incorrect reconnect offsets. Implement the contracted header including offset zero and raw-byte stream in server/client, with a wire-level regression independent of the Go client.
+      status: open
+      cycle: 1
+      file: internal/supervise/supervisor.go
