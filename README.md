@@ -184,7 +184,11 @@ gaia node --host gaia-studio
   `--missed-heartbeats` (default 3) intervals without one. A node keeps
   running while the host is down, retries with backoff, and registers again
   when the host returns. Restarted with the same state directory, a node
-  keeps its id.
+  keeps its id. Until a node's first heartbeat after registering is
+  answered, which is normally about a second, a `gaia` command on that machine
+  waits at most 3 s for the host. If the host does not answer in that time,
+  the command says the node is re-establishing its connection to the host.
+  Run it again a few seconds later.
 - **Versions.** The host accepts nodes at its own API version and one
   behind. Any other node is refused, with the command that fixes it.
 - **State.** A node's state directory holds only the tailnet client's state

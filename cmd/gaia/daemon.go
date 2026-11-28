@@ -188,6 +188,13 @@ func runHost(args []string, stderr io.Writer, goos string) int {
 		tailnetAddr = tn.Addr()
 		tailnetName = reportTailnetName(ctx, tn, name, "host", log)
 		go func() { served <- serveBoth(ctx, cancel, srv, l, tl, tn) }()
+		// A node that restarts must not wait 15 s for its WireGuard
+		// session to come back (fix-0004).
+		go func() {
+			if err := tn.ResumeRestartedPeers(ctx); err != nil && ctx.Err() == nil {
+				log.Warn("watching for restarted nodes stopped; a node that restarts may take about 15 s to reach the host", "err", err)
+			}
+		}()
 	} else {
 		go func() { served <- srv.Serve(ctx, l) }()
 	}

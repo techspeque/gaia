@@ -154,6 +154,10 @@ func nodeDaemon(cfg nodeConfig, log *slog.Logger) int {
 	}
 	defer func() { _ = l.Close() }()
 
+	// link tells the forwarder where the node stands with the host, so a
+	// request while it is (re)connecting gets a prompt answer saying so.
+	link := &node.Link{}
+	link.Set(node.PhaseJoining)
 	var tn atomic.Pointer[gnet.Tailnet]
 	transport := node.HostTransport(func(ctx context.Context) (net.Conn, string, error) {
 		t := tn.Load()
@@ -172,7 +176,7 @@ func nodeDaemon(cfg nodeConfig, log *slog.Logger) int {
 
 	served := make(chan error, 1)
 	go func() {
-		served <- serveHTTP(ctx, l, node.Handler(node.Forwarder(base, transport, cfg.host, log)), log)
+		served <- serveHTTP(ctx, l, node.Handler(node.Forwarder(base, transport, cfg.host, link, log)), log)
 	}()
 	log.Info("node started", "socket", l.Path(), "state", cfg.state, "host", cfg.host, "name", cfg.name)
 
@@ -214,6 +218,7 @@ func nodeDaemon(cfg nodeConfig, log *slog.Logger) int {
 				BaseURL: base.String(),
 			},
 			Request: node.Request(cfg.name, version),
+			Link:    link,
 			Logger:  log,
 		})
 		if err != nil {
