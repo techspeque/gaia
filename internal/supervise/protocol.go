@@ -3,12 +3,12 @@ package supervise
 import (
 	"bufio"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -26,8 +26,8 @@ const (
 
 // Protocol limits.
 const (
-	maxRequestLine = 1 << 20 // one request line, input data included
-	maxFrame       = 32 << 10
+	maxRequestLine = 1 << 20  // one request line, input data included
+	maxChunk       = 32 << 10 // one read of stream bytes
 	requestTimeout = 10 * time.Second
 )
 
@@ -55,8 +55,15 @@ type Response struct {
 	OK     bool        `json:"ok"`
 	Error  *core.Error `json:"error,omitempty"`
 	Status *Status     `json:"status,omitempty"`
-	Offset int64       `json:"offset,omitempty"` // stream: where the frames start
+	Offset int64       `json:"offset,omitempty"` // stream: where the bytes start
 	PID    int         `json:"pid,omitempty"`    // ready line: the agent's pid
+}
+
+// streamHeader is the line a stream starts with. Unlike Response it always
+// carries offset, zero included.
+type streamHeader struct {
+	OK     bool  `json:"ok"`
+	Offset int64 `json:"offset"`
 }
 
 // Client talks to the supervisor of one session directory. Each call opens
@@ -163,41 +170,67 @@ func (c *Client) Resize(ctx context.Context, rows, cols uint16) error {
 }
 
 // ErrStreamCut is returned by Stream when the connection ends before the
-// supervisor marked the end of the session's output.
+// session's output did.
 var ErrStreamCut = errors.New("supervisor stream ended before the session's output did")
 
 // Stream copies the scrollback from byte offset to w, live, until the
 // session has ended and every byte has been sent (nil error), the
 // connection is cut (ErrStreamCut), ctx ends, or w fails. n counts the bytes
 // written to w, so offset+n is where to resume.
+//
+// The stream carries raw bytes and the supervisor closes it at the end, so
+// on EOF the session directory tells a complete stream from a cut one: the
+// state file records the end, and the scrollback ends at offset+n.
 func (c *Client) Stream(ctx context.Context, offset int64, w io.Writer) (n int64, err error) {
 	conn, r, _, err := c.call(ctx, Request{Op: OpStream, Offset: offset})
 	if err != nil {
 		return 0, err
 	}
 	defer conn.Close()
-	var hdr [4]byte
-	buf := make([]byte, maxFrame)
+	buf := make([]byte, maxChunk)
 	for {
-		if _, err := io.ReadFull(r, hdr[:]); err != nil {
-			return n, streamErr(ctx, err)
+		m, rerr := r.Read(buf)
+		if m > 0 {
+			k, werr := w.Write(buf[:m])
+			n += int64(k)
+			if werr == nil && k < m {
+				werr = io.ErrShortWrite
+			}
+			if werr != nil {
+				return n, werr
+			}
 		}
-		size := binary.BigEndian.Uint32(hdr[:])
-		if size == 0 {
-			return n, nil
+		if errors.Is(rerr, io.EOF) {
+			return n, c.streamEnd(ctx, offset+n)
 		}
-		if size > maxFrame {
-			return n, fmt.Errorf("supervisor frame of %d bytes exceeds %d", size, maxFrame)
-		}
-		if _, err := io.ReadFull(r, buf[:size]); err != nil {
-			return n, streamErr(ctx, err)
-		}
-		m, err := w.Write(buf[:size])
-		n += int64(m)
-		if err != nil {
-			return n, err
+		if rerr != nil {
+			return n, streamErr(ctx, rerr)
 		}
 	}
+}
+
+// streamEnd reports whether a stream that reached EOF at byte end got the
+// session's whole output.
+func (c *Client) streamEnd(ctx context.Context, end int64) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	dir := filepath.Dir(c.path)
+	st, err := ReadState(dir)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrStreamCut, err)
+	}
+	if !st.Ended() {
+		return fmt.Errorf("%w: the connection closed while the session runs", ErrStreamCut)
+	}
+	fi, err := os.Stat(filepath.Join(dir, ScrollbackFile))
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrStreamCut, err)
+	}
+	if fi.Size() != end {
+		return fmt.Errorf("%w: got the scrollback to byte %d of %d", ErrStreamCut, end, fi.Size())
+	}
+	return nil
 }
 
 func streamErr(ctx context.Context, err error) error {

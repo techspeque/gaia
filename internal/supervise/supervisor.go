@@ -2,7 +2,6 @@ package supervise
 
 import (
 	"bufio"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -541,8 +540,9 @@ func (s *supervisor) resize(rows, cols uint16) error {
 	return nil
 }
 
-// stream sends the scrollback from offset, live, as frames, and an empty
-// frame once the session has ended and every byte is sent.
+// stream sends the header {"ok":true,"offset":N}, then the raw scrollback
+// bytes from offset, live, and closes the connection once the session has
+// ended and every byte is sent.
 func (s *supervisor) stream(conn net.Conn, offset int64) {
 	s.mu.Lock()
 	size := s.size
@@ -561,20 +561,19 @@ func (s *supervisor) stream(conn net.Conn, offset int64) {
 		return
 	}
 	defer f.Close()
-	if err := writeLine(conn, Response{OK: true, Offset: offset}); err != nil {
+	if err := writeLine(conn, streamHeader{OK: true, Offset: offset}); err != nil {
 		return
 	}
-	frame := make([]byte, 4+maxFrame)
+	buf := make([]byte, maxChunk)
 	for {
 		s.mu.Lock()
 		size, ended, changed := s.size, s.ended, s.notify
 		s.mu.Unlock()
 		for offset < size {
-			n := min(int64(maxFrame), size-offset)
-			m, err := f.ReadAt(frame[4:4+n], offset)
+			n := min(int64(maxChunk), size-offset)
+			m, err := f.ReadAt(buf[:n], offset)
 			if m > 0 {
-				binary.BigEndian.PutUint32(frame[:4], uint32(m))
-				if _, werr := conn.Write(frame[:4+m]); werr != nil {
+				if _, werr := conn.Write(buf[:m]); werr != nil {
 					return
 				}
 				offset += int64(m)
@@ -585,8 +584,7 @@ func (s *supervisor) stream(conn net.Conn, offset int64) {
 			}
 		}
 		if ended {
-			_, _ = conn.Write([]byte{0, 0, 0, 0})
-			return
+			return // the caller closes the connection
 		}
 		<-changed
 	}

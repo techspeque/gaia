@@ -427,6 +427,72 @@ func TestStreamReconnectFromOffset(t *testing.T) {
 	}
 }
 
+// rawStream sends a stream request over a plain socket connection and
+// returns the conn, for wire-level checks that do not use Client.
+func rawStream(t *testing.T, dir string, offset int64) net.Conn {
+	t.Helper()
+	c, err := net.Dial("unix", filepath.Join(dir, SocketFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fmt.Fprintf(c, "{\"op\":\"stream\",\"offset\":%d}\n", offset); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// readRaw reads the header line and every byte after it until the
+// supervisor closes the connection.
+func readRaw(t *testing.T, c net.Conn) (header, body string) {
+	t.Helper()
+	defer c.Close()
+	_ = c.SetReadDeadline(time.Now().Add(30 * time.Second))
+	all, err := io.ReadAll(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, b, ok := bytes.Cut(all, []byte("\n"))
+	if !ok {
+		t.Fatalf("no header line in %q", all)
+	}
+	return string(h), string(b)
+}
+
+// TestStreamWireFormat checks the stream on the wire: the header carries
+// offset, zero included, and the rest is exactly the scrollback from there,
+// with nothing added.
+func TestStreamWireFormat(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		s := start(t, newSpec(t, core.SessionHeadless, "sleep:1s", "exit:0"))
+		header, body := readRaw(t, rawStream(t, s.dir, 0))
+		s.wait()
+		if header != `{"ok":true,"offset":0}` {
+			t.Errorf("header %q", header)
+		}
+		if body != "" {
+			t.Errorf("empty scrollback streamed as %q", body)
+		}
+	})
+	t.Run("bytes", func(t *testing.T) {
+		s := start(t, newSpec(t, core.SessionHeadless, "print:hello world", "sleep:1s", "print:bye", "exit:0"))
+		s.waitFor("hello world\n")
+		from0, from6 := rawStream(t, s.dir, 0), rawStream(t, s.dir, 6)
+		h0, b0 := readRaw(t, from0)
+		h6, b6 := readRaw(t, from6)
+		s.wait()
+		sb := s.scrollback()
+		if sb != "hello world\nbye\n" {
+			t.Fatalf("scrollback %q", sb)
+		}
+		if h0 != `{"ok":true,"offset":0}` || b0 != sb {
+			t.Errorf("from 0: header %q body %q, want the whole scrollback", h0, b0)
+		}
+		if h6 != `{"ok":true,"offset":6}` || b6 != sb[6:] {
+			t.Errorf("from 6: header %q body %q, want %q", h6, b6, sb[6:])
+		}
+	})
+}
+
 func TestStreamRefusesOffsetPastEnd(t *testing.T) {
 	s := start(t, newSpec(t, core.SessionHeadless, "print:abc", "sleep:1h"))
 	s.waitFor("abc")
