@@ -227,6 +227,21 @@ gaia service uninstall
   run, `loginctl enable-linger USER`; Gaia never runs it.
 - Windows is not supported yet.
 
+## Footprint
+
+Measured on v0.0.1 (linux/amd64), Phase 0 gate, two Ubuntu 26.04 machines
+on a tailnet, each daemon a user service idle for about 10 minutes with two
+registered nodes and no sessions:
+
+| | Resident memory (VmRSS) | CPU, idle |
+|---|---|---|
+| `gaia host --tailnet --node` | 41.8 MB | 0.08 s per minute |
+| `gaia node` | 40.3 MB | 0.11 s per minute |
+
+The service's cgroup reports about 20 MB (`MemoryCurrent`) for each; VmRSS
+also counts the binary's shared pages. Release binary: 26.2 MB
+(linux/amd64, 26,177,698 bytes); release archives 8.6–10.6 MB.
+
 ## Contributing and security
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities privately as
