@@ -120,5 +120,21 @@ None.
 
 ## Report
 
-Filled at implementation. Facts and evidence only: what changed, commands run and their results,
-decisions taken with the reason, findings resolved. No narrative; short.
+- Added: `internal/core/session.go` (+test), `internal/core/supervisor.go`
+  (+test), `internal/store/migrations/0003_sessions.sql`,
+  `internal/store/session.go` (+test), `testdata/contract/gaia/api-v1/sessions-empty.json`,
+  `sessions.json`. Edited: `testdata/contract/README.md` (two fixture rows).
+- Schema version 2 → 3. Terminal rows frozen by trigger
+  `sessions_terminal_frozen`; deletes refused by `sessions_no_delete`;
+  state/ended_at/exit_code consistency by CHECKs.
+- Tests: `TestSessionTransitionMatrix` (36 moves vs `core.CanTransition`),
+  `TestTerminalSessionFrozenInSQL`, `TestSessionArgvRoundTrip`,
+  `TestSessionColumnsHoldNoCredential`, `TestMigrateV2KeepsNodesAddsSessions`,
+  `TestSessionSchemaChecks`, `TestSessionsFixturesRoundTrip`,
+  `TestSessionsFixtureCoversEveryState`, `TestSupervisorStateShape`, and the
+  validation tests named in the test plan.
+- `make verify`: green (fmt, vet, staticcheck, all tests).
+- Decision: `UpdateSessionState` takes live targets only and
+  `SetSessionExit` terminal ones, so every terminal row gets `ended_at` in
+  the same write. `exited` needs an exit code; `stopped` and `failed` may
+  have none.

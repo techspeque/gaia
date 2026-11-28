@@ -1,0 +1,114 @@
+{
+  "sessions": [
+    {
+      "id": "sess_0a1b2c3d4e5f6g7h8j9k0m1n2r",
+      "node_id": "node_7k2m9x4q1v8c3n5r6t0w2y4z80",
+      "node_name": "gaia-studio",
+      "profile": "",
+      "repo": "https://git.example.com/acme/widgets.git",
+      "branch": "main",
+      "slice": "",
+      "mode": "headless",
+      "argv": [
+        "claude",
+        "-p",
+        "Fix the failing test"
+      ],
+      "state": "exited",
+      "started_at": "2026-11-27T14:00:00Z",
+      "ended_at": "2026-11-27T14:12:30Z",
+      "exit_code": 0
+    },
+    {
+      "id": "sess_1a1b2c3d4e5f6g7h8j9k0m1n2r",
+      "node_id": "node_7k2m9x4q1v8c3n5r6t0w2y4z80",
+      "node_name": "gaia-studio",
+      "profile": "",
+      "repo": "https://git.example.com/acme/widgets.git",
+      "branch": "feature/login",
+      "slice": "",
+      "mode": "interactive",
+      "argv": [
+        "opencode"
+      ],
+      "state": "stopped",
+      "started_at": "2026-11-27T14:05:00Z",
+      "ended_at": "2026-11-27T14:20:00Z",
+      "exit_code": 143
+    },
+    {
+      "id": "sess_2a1b2c3d4e5f6g7h8j9k0m1n2r",
+      "node_id": "node_7k2m9x4q1v8c3n5r6t0w2y4z80",
+      "node_name": "gaia-studio",
+      "profile": "",
+      "repo": "",
+      "branch": "",
+      "slice": "",
+      "mode": "headless",
+      "argv": [
+        "codex",
+        "exec",
+        ""
+      ],
+      "state": "failed",
+      "started_at": "2026-11-27T14:10:00Z",
+      "ended_at": "2026-11-27T14:10:01Z",
+      "exit_code": null
+    },
+    {
+      "id": "sess_3a1b2c3d4e5f6g7h8j9k0m1n2r",
+      "node_id": "node_7k2m9x4q1v8c3n5r6t0w2y4z80",
+      "node_name": "gaia-studio",
+      "profile": "",
+      "repo": "https://git.example.com/acme/widgets.git",
+      "branch": "main",
+      "slice": "",
+      "mode": "headless",
+      "argv": [
+        "claude",
+        "-p",
+        "Say \"done\"\nwhen finished"
+      ],
+      "state": "lost",
+      "started_at": "2026-11-27T14:15:00Z",
+      "ended_at": null,
+      "exit_code": null
+    },
+    {
+      "id": "sess_4a1b2c3d4e5f6g7h8j9k0m1n2r",
+      "node_id": "node_7k2m9x4q1v8c3n5r6t0w2y4z80",
+      "node_name": "gaia-studio",
+      "profile": "",
+      "repo": "https://git.example.com/acme/widgets.git",
+      "branch": "main",
+      "slice": "",
+      "mode": "interactive",
+      "argv": [
+        "claude"
+      ],
+      "state": "running",
+      "started_at": "2026-11-27T14:30:00Z",
+      "ended_at": null,
+      "exit_code": null
+    },
+    {
+      "id": "sess_5a1b2c3d4e5f6g7h8j9k0m1n2r",
+      "node_id": "node_7k2m9x4q1v8c3n5r6t0w2y4z80",
+      "node_name": "gaia-studio",
+      "profile": "",
+      "repo": "https://git.example.com/acme/widgets.git",
+      "branch": "main",
+      "slice": "",
+      "mode": "headless",
+      "argv": [
+        "opencode",
+        "run",
+        "Review the diff"
+      ],
+      "state": "starting",
+      "started_at": "2026-11-27T14:45:00Z",
+      "ended_at": null,
+      "exit_code": null
+    }
+  ]
+}
