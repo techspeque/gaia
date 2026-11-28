@@ -67,6 +67,17 @@ func TestResolveName(t *testing.T) {
 		}, role: "node", want: "studio"},
 		{name: "host registry from before", setup: func(t *testing.T, dir string) { write(t, dir, "gaia.db", "") },
 			role: "host", want: "studio"},
+		{name: "never joined, incidental file", setup: func(t *testing.T, dir string) { write(t, dir, "authkey", "tskey-auth-x\n") },
+			role: "host", want: "gaia-studio"},
+		{name: "never joined node, incidental file", setup: func(t *testing.T, dir string) { write(t, dir, "authkey", "tskey-auth-x\n") },
+			role: "node", want: "gaia-studio"},
+		{name: "empty tsnet dir", setup: func(t *testing.T, dir string) {
+			if err := os.MkdirAll(filepath.Join(dir, "tsnet"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}, role: "node", want: "gaia-studio"},
+		{name: "node ignores a registry", setup: func(t *testing.T, dir string) { write(t, dir, "gaia.db", "") },
+			role: "node", want: "gaia-studio"},
 		{name: "bad recorded name", setup: func(t *testing.T, dir string) { write(t, dir, nameFile, "Bad_Name\n") },
 			role: "host", err: "invalid node name"},
 	} {

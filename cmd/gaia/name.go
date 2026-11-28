@@ -59,7 +59,7 @@ func legacyName(machine, role string) string {
 
 // resolveName returns the daemon's name: flagName when given; else the name
 // recorded in state; else, for a state directory a daemon used before names
-// were recorded (it exists and is not empty), the name it had then, so an
+// were recorded (see usedBefore), the name it had then, so an
 // existing install keeps its tailnet name; else defaultName. It reads state
 // and writes nothing; recordName stores the result.
 func resolveName(flagName, state, machine, role string) (string, error) {
@@ -78,14 +78,38 @@ func resolveName(flagName, state, machine, role string) (string, error) {
 	case !errors.Is(err, fs.ErrNotExist):
 		return "", fmt.Errorf("reading the recorded name: %w", err)
 	}
-	entries, err := os.ReadDir(state)
-	switch {
-	case err == nil && len(entries) > 0:
+	used, err := usedBefore(state, role)
+	if err != nil {
+		return "", err
+	}
+	if used {
 		return legacyName(machine, role), nil
-	case err != nil && !errors.Is(err, fs.ErrNotExist):
-		return "", fmt.Errorf("state directory: %w", err)
 	}
 	return defaultName(machine, role), nil
+}
+
+// hostDBFile is the host's registry in its state directory (store's
+// dbFileName).
+const hostDBFile = "gaia.db"
+
+// usedBefore reports whether a daemon of role used state before names were
+// recorded: it holds tsnet state from a join or, for the host, a registry.
+// Other files, such as an auth-key file, do not count.
+func usedBefore(state, role string) (bool, error) {
+	if gnet.HasState(state) {
+		return true, nil
+	}
+	if role != "host" {
+		return false, nil
+	}
+	fi, err := os.Stat(filepath.Join(state, hostDBFile))
+	switch {
+	case err == nil:
+		return fi.Mode().IsRegular(), nil
+	case errors.Is(err, fs.ErrNotExist):
+		return false, nil
+	}
+	return false, fmt.Errorf("state directory: %w", err)
 }
 
 // selfNamer is *gnet.Tailnet's Self.
