@@ -282,6 +282,9 @@ findings:
       severity: P2
       category: behavior
       finding: 'internal/node/session.go:611 — A cancelled Stop context makes Status dialing return CodeUnavailable, which observe treats as a dead supervisor; Stop persists/reports lost for an agent that is still running and reachable, making its scrollback eligible for pruning. Reproduced with an already-cancelled context followed by a successful fresh Status: manager state is lost. Treat caller cancellation/deadline expiry as undecided rather than evidence of supervisor loss, and add a regression test.'
-      status: open
+      status: resolved
+      resolved_by: commit 9a35b8007391; test TestStopCancelledStaysRunning; 9a35b80
       cycle: 1
       file: internal/node/session.go
+      commit: 9a35b80073914fc3d78e805c8a6bfb1bfc90917d
+      evidence: test TestStopCancelledStaysRunning
