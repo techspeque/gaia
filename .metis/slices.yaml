@@ -1,5 +1,17 @@
 version: 1
 slices:
+    - id: fix-0004
+      title: 'A node returning from an outage stalls: gaia nodes times out for about 15 s after re-registration'
+      type: fix
+      priority: p0
+      risk: high
+      coder: claude-code/opus-5-5
+      reviewer: codex/gpt-6-astra
+      coded: false
+      reviewed: false
+      review_cycles: 0
+      notes: 'Findings f-012 and f-017, from the Phase 0 gate on two real machines (v0.0.1 and v0.0.2), reproduced three times. After the node (process or user service) had been down 40-45 s and started again, it registered at once, then the next heartbeat and the next forwarded request timed out: gaia nodes on the node at 11 s after start exited 99 after 10,020 ms (''context deadline exceeded''), at 16 s took 4,060 ms, from 17 s on 14-15 ms. Node log: ''heartbeat failed; registering again'' 15 s after the first registration. Not seen on an immediate restart. Suspected cause, unproven: the host keeps a stale path to the node''s previous WireGuard endpoint. Find the cause first and state it with evidence. The Human decided on 2026-11-28 that recovery after an outage may take up to 30 s and that the 500 ms limit is for steady state; within that bound, make recovery prompt and make it legible: a forwarded request during recovery must not hold the caller for the full timeout with a bare ''context deadline exceeded'' when the daemon can know it is still re-establishing; say what is happening. Add a test that reproduces the outage with the test control server if the cause can be reproduced there; if it only shows on real machines, say so and give the manual check. Later phases run sessions through this forwarder, so do not paper over it with a longer timeout.'
+      created: "2026-11-28"
     - id: phase-1-ws-1.1
       title: Session model, store and API types
       type: feat
