@@ -644,6 +644,12 @@ func (m *Manager) reconcile(ctx context.Context, id core.SessionID) {
 	switch {
 	case obs.state != nil && obs.state.Ended():
 		to, code := classify(rec.StopRequested, *obs.state)
+		if !rec.State.CanTransition(to) && rec.State.CanTransition(core.SessionRunning) {
+			// A daemon that died after the ready line and before
+			// recording running: the agent did run, so it passes
+			// through running to its end.
+			m.transition(rec, core.SessionRunning, nil, "", nil)
+		}
 		m.transition(rec, to, code, obs.state.Signal, obs.state.EndedAt)
 	case obs.alive:
 		m.transition(rec, core.SessionRunning, nil, "", nil)

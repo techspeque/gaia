@@ -683,6 +683,37 @@ func TestRestartAtEveryStep(t *testing.T) {
 	}
 }
 
+// TestRestartAfterEndAtReady: the daemon dies after the ready line and
+// before recording running, the agent ends before a new daemon opens, and
+// the new daemon still records and reports the real exit code.
+func TestRestartAfterEndAtReady(t *testing.T) {
+	e := newDaemonEnv(t)
+	d1 := startDaemon(t, e, "ready")
+	id := newID(t)
+	_, _ = d1.call(daemonRequest{Op: "start", ID: id, Work: t.TempDir(), Steps: []string{"sleep:300ms", "exit:7"}})
+	d1.waitDead()
+	sv := filepath.Join(e.root, id.String(), supervisorDir)
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if st, err := supervise.ReadState(sv); err == nil && st.Ended() {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the supervisor did not record the end")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	d2 := startDaemon(t, e, "")
+	info := waitInfo(t, func() (SessionInfo, error) { return d2.get(id) },
+		func(i SessionInfo) bool { return i.State.Terminal() }, "the end")
+	wantExit(t, info, core.SessionExited, 7)
+	rs := e.waitReports(t, id, lastIs(core.SessionExited))
+	checkReportOrder(t, rs)
+	if c := rs[len(rs)-1].ExitCode; c == nil || *c != 7 {
+		t.Fatalf("last report %+v, want exit code 7", rs[len(rs)-1])
+	}
+}
+
 // TestStopRecordsStopped: stop yields stopped with 128+SIGTERM; stopping
 // again returns the same session.
 func TestStopRecordsStopped(t *testing.T) {
