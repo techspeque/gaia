@@ -229,18 +229,18 @@ gaia service uninstall
 
 ## Footprint
 
-Measured on v0.0.1 (linux/amd64), Phase 0 gate, two Ubuntu 26.04 machines
-on a tailnet, each daemon a user service idle for about 10 minutes with two
+Measured on v0.0.2 (linux/amd64), Phase 0 gate, two Ubuntu 26.04 machines
+on a tailnet, each daemon a user service idle for about 11 minutes with two
 registered nodes and no sessions:
 
 | | Resident memory (VmRSS) | CPU, idle |
 |---|---|---|
-| `gaia host --tailnet --node` | 41.8 MB | 0.08 s per minute |
-| `gaia node` | 40.3 MB | 0.11 s per minute |
+| `gaia host --tailnet --node` | 41.7 MB | 0.09 s per minute |
+| `gaia node` | 39.9 MB | 0.10 s per minute |
 
 The service's cgroup reports about 20 MB (`MemoryCurrent`) for each; VmRSS
 also counts the binary's shared pages. Release binary: 26.2 MB
-(linux/amd64, 26,177,698 bytes); release archives 8.6–10.6 MB.
+(linux/amd64, 26,198,178 bytes); release archives 8.6–10.6 MB.
 
 ## Contributing and security
 

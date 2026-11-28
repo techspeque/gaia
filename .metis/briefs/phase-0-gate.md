@@ -5,9 +5,10 @@
 
 ## Phase being validated
 
-Phase 0: Foundation. Release v0.0.1 (public GitHub release, keyless-signed),
-installed with `scripts/install.sh` from `main`
-(`GAIA_VERSION=v0.0.1 GAIA_REQUIRE_SIGNATURE=1`), as the login user, no root.
+Phase 0: Foundation. Run 1: release v0.0.1 (commit b9b2838). Run 2: release
+v0.0.2 (commit 948f2d8607e9), carrying fix-0003. Both public GitHub releases,
+keyless-signed, installed with `scripts/install.sh` from `main`
+(`GAIA_VERSION=… GAIA_REQUIRE_SIGNATURE=1`), as the login user, no root.
 
 Machines: gate host A runs `gaia host`; gate host B (the GPU machine) runs
 `gaia node`; the laptop is a third device of the same tailnet user, joined
@@ -197,3 +198,163 @@ ordinary setup of machines that already run Tailscale. fix-0003 is inserted
 before this gate. Scenarios 1, 3–7 and the performance checks pass on
 v0.0.1 with the assigned names; scenario 8 waits for the reboot. The gate is
 re-run from scenario 2 on the release carrying fix-0003.
+
+### Run 2 — 2026-11-28, v0.0.2 — Coder's evidence complete except the reboot
+
+Same hosts, same tailnet, `<A>`/`<B>` as in run 1. `metis verify --pre`
+on the branch after fix-0003: ALL GREEN. Install, both hosts, 10:05–10:06 GMT: the same `install.sh`
+(sha256 `e04cfa8a…09adb94`) with `GAIA_VERSION=v0.0.2
+GAIA_REQUIRE_SIGNATURE=1` over the running v0.0.1: "signature of
+checksums.txt verified", "checksum of gaia_0.0.2_linux_amd64.tar.gz
+verified", `gaia 0.0.2 (commit 948f2d8) linux/amd64`, sha256
+`53649b6c…7c0919` on both. Run by the agent over ssh as the login user,
+no sudo, 10:05–10:22 GMT. Raw evidence: `.local/gate/run2/` and
+`~/gaia-gate/run2/` on the hosts. No run 1 result is carried over.
+
+#### Moving the v0.0.1 installation to the new names — PASS, as README says
+
+README "Machines set up with Gaia v0.0.1", step by step:
+- Stopped both user services; copied each state directory to
+  `~/gaia-gate/run2/v001-state-backup/`; deleted `<state>/tsnet` (and
+  `<state>/name`, absent) on both; kept the host's `gaia.db`.
+- **Deviation, deliberate:** README's step "remove the device from the
+  tailnet" is the Human's (admin console) and is deferred. It is not needed
+  for the new names: the old devices hold `<A>-1` and `<B>-1`, the new ones
+  ask for `gaia-<A>` and `gaia-<B>`. The two old devices are offline since
+  10:06 and stay listed in the tailnet until the Human deletes them.
+- Host: `gaia host --tailnet --node --name gaia-<A> --auth-key-file … --allow
+  node:gaia-<B>` (README says `$GAIA_AUTHKEY`; the key file is the same input
+  path). Log: `"tailnet name assigned","asked":"gaia-<A>","tailnet_name":"gaia-<A>"`;
+  `host started … name gaia-<A>, tailnet_name gaia-<A>`; its own node
+  re-registered with the same id as in run 1 (`node_4d8w…`, `updated: true`)
+  under the new name. `<state>/name` = `gaia-<A>`.
+- Node: `gaia node --host gaia-<A> --join --auth-key-file …`, no `--name`
+  (README's fresh-node command). Log: `node started … name gaia-<B>`,
+  `"tailnet name assigned","asked":"gaia-<B>","tailnet_name":"gaia-<B>"`,
+  `node registered` (new id `node_77m6…`, new tailnet identity), first try,
+  no 403. `<state>/name` = `gaia-<B>`.
+- `gaia nodes remove <B>` removed the v0.0.1 entry (`node_xnhd…`), as README
+  says to.
+
+#### Scenario 1: one machine, local-only — PASS (host B)
+
+During the scenario 3 stop on B: `gaia host --node --state
+~/gaia-gate/run2/s1-state`. `gaia nodes -o json`: one node `gaia-<B>`,
+`tailnet_identity` `local`, `tailnet_name` `""`, `online`. Sockets of the
+pid: only the unix listener `/tmp/gaia-1000/gaia.sock`; no TCP or UDP.
+`gaia nodes` 6–7 ms (20 runs). SIGTERM: `host stopped`, exit 0; state
+directory left (`gaia.db`, `name`).
+
+#### Scenario 2: two machines on a tailnet — PASS (README as written)
+
+From the steps above: both devices got exactly the names they asked for;
+the node reached the host with README's `--host gaia-<A>` and was admitted
+by `node:gaia-<B>`, the `tailnet_name` it logged. `gaia nodes` on A and on
+B: `gaia-<A>` and `gaia-<B>`, `TAILNET NAME` equal to the name, `online`,
+linux/amd64, 0.0.2.
+- The fix-0003 hint, checked with B's joined state and no `--join`:
+  `gaia node --host <A>` logs "connect tcp …:443: connection was refused:
+  --host <A> is <A>.<tailnet>, where nothing answers on port 443, so it is
+  not a Gaia host; a Gaia host asks for the tailnet name gaia-<machine name>
+  and logs the tailnet_name it was given". `--host <A>-1` (the stale, offline
+  v0.0.1 device) times out with no hint (advisory f-018).
+- Stale devices do not interfere: `gaia-<A>` matches one peer (MagicDNS first
+  label), the allowlist names only `node:gaia-<B>`, and every registration
+  and heartbeat after the move went to the new devices.
+
+#### Scenario 3: node offline and back without a second join — PASS
+
+Twice. (a) Node process stopped 10:07:01; at 10:07:44 A lists `gaia-<B>`
+`offline`, 50 s since the last heartbeat; restarted with README's `gaia node
+--host gaia-<A>` (no key): `node registered`, same id `node_77m6…`.
+(b) Node user service stopped 10:09:47; at 10:10:27 `offline`, 40 s;
+`systemctl --user start`: `online`, same id. The tailnet lists one
+`gaia-<B>` device throughout (no `-1`). Stopping, not suspending.
+Both times f-012 recurred: see Performance.
+
+#### Scenario 4: host restart keeps ids — PASS
+
+Host restarted 10:08:35 with no `--name` and no key: log `asked: gaia-<A>`
+(from `<state>/name`), `tailnet_name gaia-<A>`. `[id, name,
+tailnet_identity, tailnet_name]` of both nodes identical before and after
+(`diff`: none); both `online` within 10 s.
+
+#### Scenario 5: listeners — PASS (both hosts)
+
+Under the user services (`ss -tulnap`, `ss -xlp` for the unit's MainPID):
+no kernel TCP listener; unix listener `/tmp/gaia-1000/gaia.sock`
+`srw-------`; two UDP sockets (IPv4, IPv6) whose port is the one tsnet logs
+as its WireGuard endpoint ("endpoints changed: … :34778 (local)" on A,
+":54516" on B). TCP otherwise only outbound to Tailscale's control and DERP
+servers. From the laptop over the tailnet: `gaia-<A>` port 443 open, 80 and
+8080 closed; `gaia-<B>` 443 and 80 closed; A's and B's LAN addresses and
+A's system-Tailscale address, port 443, refused.
+
+#### Scenario 6: a tailnet device not on the allowlist is refused — PASS
+
+Laptop, 10:09:03: `curl -k https://gaia-<A>.<tailnet>/api/v1/nodes` → 403,
+`{"error":{"code":"forbidden","message":"permission denied","details":{}}}`.
+Host: `WARN "tailnet request refused: peer not allowlisted" … node: <laptop>`.
+Same login as the admitted node, so admission is by `node:` only. Without
+`-k` the certificate is refused (self-signed; tailnet HTTPS certificates
+off), and f-011's log line recurs.
+
+#### Scenario 7: `-o json` matches its fixture — PASS
+
+`gaia nodes` is still the only `-o json` command. The fixture
+`testdata/contract/gaia/api-v1/nodes.json` gained `tailnet_name` in fix-0003
+(commit 6d43791). B local-only, A host and B node outputs: same keys in the
+same order, same types, same line layout; ids match `^node_[0-9a-z]{26}$`;
+`tailnet_name` `""` local-only, the assigned names on the tailnet.
+
+#### Scenario 8: user services, no root, reboot, uninstall — needs the Human (reboot)
+
+- After the hand runs, as README says: A `gaia service install host
+  --tailnet --node --allow node:gaia-<B>` (rewrote the v0.0.1 unit, "wrote …
+  and started gaia host"); B `gaia service install node --host gaia-<A>`.
+  Units: `ExecStart` with absolute `--state`, no `--name` (taken from
+  `<state>/name`), no key; enabled; `NRestarts=0`; processes run as the
+  login user.
+- `gaia service uninstall` on B: "stopped the service and removed … the
+  state directory is left in place"; unit `not-found`; no process; file
+  listing and sha256 of `name` and `tsnet/tailscaled.state` identical before
+  and after. Reinstalled: online, same id.
+- **Not yet evidenced:** up after a reboot (the Human's `sudo reboot`).
+
+#### Auth key
+
+Only `--auth-key-file`. Afterwards on both hosts, fixed-string match against
+the key file with blank lines removed, no content printed: no hit in
+`~/gaia-gate/` (including the v0.0.1 state backup), the state directory, the
+unit files, `~/.local/share/tailscale`, `/tmp/gaia-1000`, the user journal
+(also no `tskey-` prefix), or any own process's cmdline or environ.
+
+#### Performance
+
+- `gaia nodes`, steady state, 20 runs each, text and json: host A 6–8 ms;
+  node B 9–10 ms. Thresholds 100 ms and 500 ms: PASS at steady state.
+- **Not under 500 ms right after a node returns from an outage (f-012,
+  reproduced twice, f-017):** under the service, 1 s after start exit 90 (no
+  daemon yet), 11 s exit 99 after 10,020 ms, 16 s 4,060 ms, then 14–15 ms.
+  The Reviewer decides whether the plan's check covers this window.
+- Binary: linux/amd64 26,198,178 bytes; archives 8.6–10.6 MB (26 assets).
+- Idle, under the user services, 60 s sample from `/proc/PID/stat` and
+  `status`: host A (up 12 min) VmRSS 41,664 kB (HWM 43,104 kB), 9 CPU ticks
+  in 60 s (0.09 s); node B (up 11 min) VmRSS 39,904 kB (HWM 41,152 kB), 10
+  ticks (0.10 s). Cgroup `MemoryCurrent` 19.5 and 19.9 MB; `NRestarts=0`.
+  README "Footprint" updated to v0.0.2.
+
+#### Run 2 findings
+
+| Finding | Severity | Status |
+|---|---|---|
+| fix-0003 (run 1's P1) | — | Fixed on v0.0.2: scenario 2 passes as README is written |
+| f-011 TLS handshake log names no peer | advisory | Seen again (10:09:03) |
+| f-012 stall after a node returns from an outage | advisory | Reproduced twice; evidence in f-017 |
+| f-013 empty `~/.local/share/tailscale` | advisory | Still referenced: v0.0.2 logs "using system state directory" there |
+| f-018 stale `--host` gives no hint | advisory | New |
+
+#### Run 2 status
+
+Every scenario and performance check has evidence on v0.0.2 except
+scenario 8's reboot. Not flipped coded: that waits for the reboot.
