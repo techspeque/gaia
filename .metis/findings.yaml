@@ -228,3 +228,12 @@ findings:
       status: open
       cycle: 1
       file: internal/supervise/supervisor.go
+    - id: f-021
+      date: "2026-11-28"
+      slice: phase-1-ws-1.2
+      severity: P1
+      category: behavior
+      finding: 'internal/supervise/supervisor.go:63 — The ready line is written before run installs SIGPIPE protection. Reproduced by closing the stdout read end before submitting a valid sleep spec: supervisor exits on SIGPIPE (-13), leaving an unended state and unsupervised child. Install signal protection before writing readiness (and protect the error/log path), with a subprocess regression proving starter loss during readiness still drains output and records the child exit.'
+      status: open
+      cycle: 1
+      file: internal/supervise/supervisor.go
