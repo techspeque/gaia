@@ -169,6 +169,9 @@ findings:
       severity: P2
       category: behavior
       finding: README.md:173 — The documented host migration deletes tsnet and name but leaves gaia.db, then restarts without --name. Legacy-name resolution therefore requests studio again, not the promised gaia-studio (TestReviewREADMEHostRejoin); nodes following the next instruction cannot reach the host by its new name. — Include an explicit --name gaia-<machine> in the host re-join command while preserving the registry, and verify the documented migration selects the new name.
-      status: open
+      status: resolved
+      resolved_by: commit 15aa90bb7470; test TestResolveName/host_re-join_keeps_registry
       cycle: 1
       file: README.md
+      commit: 15aa90bb747017d1c10ba70c651db7bcfc3ea880
+      evidence: test TestResolveName/host_re-join_keeps_registry
