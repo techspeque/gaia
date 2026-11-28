@@ -306,3 +306,12 @@ findings:
       status: open
       cycle: 1
       file: internal/host/session.go
+    - id: f-028
+      date: "2026-11-28"
+      slice: phase-1-ws-1.4
+      severity: P2
+      category: behavior
+      finding: 'cmd/gaia/cli/sessions.go:101 — Follow treats output-writer errors as recoverable stream cuts and discards them. Reproduced with a writer returning disk-full while the session remains running: Follow queries the session and waits until context deadline rather than returning the write error; the CLI uses an unbounded background context. Distinguish sink failures from transport failures, return sink failures immediately, and add regression coverage.'
+      status: open
+      cycle: 1
+      file: cmd/gaia/cli/sessions.go
